@@ -8,7 +8,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["server/db/schema.sql"]
+  external_node_modules = ["pg"]
 
 [[redirects]]
   from = "/api/*"
