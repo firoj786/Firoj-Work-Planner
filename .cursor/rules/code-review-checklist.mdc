@@ -1,0 +1,173 @@
+---
+description: Comprehensive code review checklist — reference during code reviews to verify all standards are met
+alwaysApply: true
+---
+
+# Code Review Checklist
+
+Reference this checklist when reviewing code changes. Flag violations clearly.
+
+> **Companion rules:**
+> - **`code-review-format.mdc`** — defines HOW to present findings (severity tags, layered structure, scope header, build evidence, summary). Every checklist item below maps to a row in the cross-cutting cursor-rules audit table required by that rule.
+> - **`verification-before-completion.mdc`** — defines the evidence standard for any "passes / works / done" claim made in a review.
+>
+> A review is complete only when this checklist is satisfied AND it is presented in the format prescribed by `code-review-format.mdc`.
+
+## Dependency Injection
+- [ ] No `@Autowired` — constructor injection via `@RequiredArgsConstructor` only
+- [ ] All injected dependencies are `private final`
+- [ ] No `new` instantiation of Spring-managed beans
+
+## Security
+- [ ] JWT decoding in try-catch — never bubble as 500
+- [ ] Public paths in `SecurityConstant.PUBLIC_PATHS`
+- [ ] `SessionCreationPolicy.STATELESS`
+- [ ] Role checks use `@PreAuthorize` — no custom annotations
+- [ ] `AccessDeniedException` → 403, not 500
+- [ ] No sensitive headers logged
+
+## Spring Framework
+- [ ] No reinvented Spring features — use built-in annotations first
+- [ ] No double bean registration (`@Component` + `FilterRegistrationBean`)
+- [ ] Security filter chain runs BEFORE interceptors
+
+## Logging
+- [ ] `log.debug` for per-request tracing, `log.info` for lifecycle events
+- [ ] `log.warn` for 4xx, `log.error` with stack trace for 5xx
+- [ ] No logging in tight loops
+- [ ] Request/response body logging truncated (max 1KB)
+
+## Configuration
+- [ ] Environment values in `application.properties` — not hardcoded
+- [ ] Shared constants in `constants/` — not duplicated
+
+## Error Handling
+- [ ] All external input has failure handling
+- [ ] Custom exceptions mapped in `GlobalExceptionHandler`
+- [ ] `GlobalExceptionHandler` extends `ResponseEntityExceptionHandler` — ensures consistent error format for all Spring MVC exceptions
+- [ ] Error responses use `ErrorCode` enum
+- [ ] Stack traces never exposed to consumers
+- [ ] Both `(String)` and `(String, Throwable)` constructors on custom exceptions
+- [ ] No `timestamp` in response bodies
+
+## Inter-Service Communication
+- [ ] All clients extend `BaseServiceClient`
+- [ ] Client named by service, not entity
+- [ ] DTOs grouped by service (`dtos/eis/`, `dtos/roster/`)
+- [ ] Base URLs include protocol prefix
+- [ ] Paginated endpoints use `fetchAllPages()`
+- [ ] `ParameterizedTypeReference` for generic responses
+- [ ] Downstream errors not exposed raw
+- [ ] `ExternalServiceException` → 502, not 500
+
+## Controllers
+- [ ] Thin — no business logic
+- [ ] `ResponseEntity<ApiResponse<T>>` for success
+- [ ] `@Valid` on all `@RequestBody`
+- [ ] `@Valid` on nested DTO fields to cascade validation
+- [ ] `@PreAuthorize` on all protected endpoints — class level if all endpoints share the same role set
+- [ ] Every validation annotation (`@NotNull`, `@NotBlank`, `@Size`, etc.) has a `message` attribute
+- [ ] No direct repository/client calls
+
+## Services
+- [ ] `@Transactional(readOnly = true)` on reads
+- [ ] `@Transactional` on writes
+- [ ] No `@Transactional` on `private` methods
+- [ ] Correct exception types per failure scenario
+- [ ] No HTTP concerns (`HttpStatus`, `ResponseEntity`)
+
+## Repositories
+- [ ] Derived methods preferred over `@Query` for simple lookups
+- [ ] JPQL + Projection Interface for aggregations (GROUP BY, COUNT) — never `Object[]`
+- [ ] Specifications for dynamic filters (search/filter endpoints with optional conditions)
+- [ ] Native SQL only for PostgreSQL-specific features
+- [ ] `@Param` for named parameters
+- [ ] `Optional<T>` for single-entity lookups
+- [ ] `default` `getBy...` methods for "get or throw" lookups — avoid repeating `.orElseThrow()` in services
+- [ ] No business logic
+
+## Enums
+- [ ] No redundant `value` field when string == name
+- [ ] `getEnum()` uses `name().equalsIgnoreCase()`
+
+## Entity Auditing
+- [ ] Domain entities extend `BaseEntity`
+- [ ] No manual `@PrePersist`/`@PreUpdate` for timestamps
+- [ ] No `ZoneOffset.UTC` in entities
+- [ ] Lookup entities do NOT extend `BaseEntity`
+
+## Lombok on Entities
+- [ ] No `@Data` on JPA entities
+- [ ] `@AllArgsConstructor` only with concrete need
+- [ ] `@ToString.Exclude` on lazy associations
+- [ ] Domain: `@Getter @Setter @NoArgsConstructor @EqualsAndHashCode(onlyExplicitlyIncluded = true, callSuper = false)`
+- [ ] Lookup: `@Getter @NoArgsConstructor @EqualsAndHashCode(onlyExplicitlyIncluded = true)`
+- [ ] `@EqualsAndHashCode.Include` on `@Id` field
+- [ ] `callSuper = false` on domain entities
+
+## Lookup Entities
+- [ ] `@Immutable` on all lookup entities
+- [ ] `@Cacheable` + `@Cache(READ_ONLY)` present
+- [ ] Corresponding `<cache>` region in `ehcache.xml`
+- [ ] No `@Setter`, `@Builder`, `@Data`
+- [ ] `<Name>Entity` suffix naming
+
+## Column Definitions
+- [ ] No `@Column(length = ...)` — Flyway defines sizes
+- [ ] `@Column` carries: `name`, `nullable`, `columnDefinition` only
+
+## Redis Caching
+- [ ] `@Cacheable` only in `CacheableDataService` — not on repositories or business services
+- [ ] `@CacheEvict` only in `CacheEvictionService`
+- [ ] Cached values are primitives/DTOs — no JPA entities in Redis
+- [ ] Every new cache has a documented eviction trigger in `CacheEvictionService`
+- [ ] Every write to cached data calls the corresponding eviction method
+- [ ] `sync=true` on high-concurrency caches
+- [ ] Explicit `key` attribute — no default `SimpleKey`
+- [ ] New cache TTL added in `application.properties` (`cache.ttl.{name}`)
+- [ ] `CacheErrorHandler` present — graceful fallback on Redis failure
+- [ ] Cache metrics enabled via actuator
+
+## Testing
+- [ ] Test plan reviewed before implementation — all scenarios (happy, edge, error) listed upfront
+- [ ] Follows Arrange-Act-Assert (AAA) structure
+- [ ] Naming: camelCase — `conditionExpectedResult` (inside `@Nested` class that provides method context)
+- [ ] `@ExtendWith(MockitoExtension.class)` — NOT `MockitoAnnotations.openMocks(this)`
+- [ ] `@Nested` for grouping related tests by operation
+- [ ] `@ParameterizedTest` for utility/algorithm methods with multiple inputs
+- [ ] One logical assertion per test — one behavior per test method
+- [ ] No production logic duplicated in tests — hard-code expected values
+- [ ] No `Thread.sleep()`, no real external services, no `@Disabled` tests
+
+## Socket-Service Modules
+- [ ] New WebSocket modules implement `WebSocketModuleHandler` — not hardcoded in `WebSocketEventProcessor`
+- [ ] Each module has its own Redis key prefix — no cross-module key sharing
+- [ ] Each module has its own event type enum — not reusing roster's `WebSocketEventType`
+- [ ] `ownsConnection()` checks module's own Redis connection key
+- [ ] Module-specific logic stays in the handler — processor only routes
+
+## Time & Timezone
+- [ ] No `ZonedDateTime.now()`, `LocalDate.now()`, `Instant.now()` without `Clock`
+- [ ] All business time operations use injected `Clock` bean — `ZonedDateTime.now(clock)`
+- [ ] `Clock` is a `private final` field injected via constructor
+- [ ] DB audit timestamps (`@CreationTimestamp`, `@UpdateTimestamp`) remain UTC — not affected by `Clock`
+
+## Query & Data Fetching Optimization
+- [ ] Filtering, sorting, and LIMIT happen in the DB — not `stream().filter().limit()` on full result sets
+- [ ] No redundant queries — if you already have entity X loaded, don't query the same table again for X's fields
+- [ ] Sequential queries merged where possible — prefer JOINs over "fetch IDs → fetch by IDs" patterns
+- [ ] External service calls scoped to relevant data — don't fetch all entities when you only need the active subset
+- [ ] In-memory grouping uses `Collectors.groupingBy` (O(n)) — not nested `stream().filter()` loops (O(n²))
+- [ ] Existence checks use `existsBy...` — not `findBy...` + null check
+- [ ] Batch saves via `saveAll()` — not single `save()` in a loop
+- [ ] Lazy associations accessed in queries use `JOIN FETCH` — no N+1 loops
+- [ ] Queries select only needed columns when full entity is not required
+- [ ] Dead/unused repository methods are removed — no orphaned queries
+
+## General
+- [ ] No commented-out code
+- [ ] Public methods have Javadoc (WHY, not WHAT)
+- [ ] No `@Index` — Flyway manages indexes
+- [ ] DTOs use classes, not records
+- [ ] No business logic in entities
+- [ ] No cargo-cult patterns

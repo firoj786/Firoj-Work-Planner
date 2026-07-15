@@ -1,0 +1,60 @@
+---
+description: WebSocket module handler pattern for the shared socket-service Lambda
+alwaysApply: false
+---
+
+# Socket-Service — WebSocket Module Handler Pattern
+
+The `socket-service` is a shared Micronaut Lambda that hosts multiple WebSocket modules
+(roster, pre-check, scheduling, etc.) behind a single API Gateway WebSocket endpoint.
+
+## Architecture
+
+```
+WebSocketEventProcessor (router)
+    ├── WebSocketModuleHandler (interface) — auto-discovered via Micronaut DI
+    │   ├── PreCheckEventHandler   (module = "precheck")
+    │   └── SchedulingEventHandler (module = "scheduling")  ← future
+    └── WebSocketEventHandler      (roster — default fallback, does NOT implement interface)
+```
+
+## Adding a New Module (Zero changes to WebSocketEventProcessor)
+
+1. Create a `@Singleton` class implementing `WebSocketModuleHandler`
+2. Return a unique `getModuleName()` (used in `?module=` query param)
+3. Implement `ownsConnection()` — check Redis key existence for your module's connection prefix
+4. Implement `handleConnect()`, `handleDisconnect()`, `handleMessage()`
+5. Create a dedicated `RedisKeyUtil` class with an isolated key prefix (e.g., `scheduling:`)
+
+### Connection URL pattern
+```
+wss://...?module={moduleName}&param1=val1&param2=val2
+```
+
+## Key Conventions
+
+### Redis Key Isolation
+- Each module MUST use its own key prefix: `precheck:`, `scheduling:`, etc.
+- Roster uses the legacy `roster:` prefix
+- Never share keys across modules
+
+### Connection Ownership
+- `$connect`: routed by `?module=` query param → `moduleHandlers.get(module)`
+- `$disconnect` / `sendMessage`: routed by `findOwner(connectionId)` which calls `ownsConnection()` on each handler
+- If no module claims the connection, roster is the default fallback
+
+### Message Envelope (all modules share this contract)
+```json
+{
+  "requestData": {
+    "type": "EVENT_TYPE_STRING",
+    "data": { ... }
+  }
+}
+```
+The processor extracts `type` and `data`, then calls `handler.handleMessage(connectionId, type, data)`.
+Each module's `handleMessage()` parses the type into its own enum internally.
+
+### Module Event Types
+- Each module has its own enum (e.g., `PreCheckEventType`, `SchedulingEventType`)
+- Do NOT reuse `WebSocketEventType` (roster's enum) for other modules

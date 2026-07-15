@@ -1,0 +1,81 @@
+---
+description: Lookup entity standards — @Immutable, Hibernate L2 cache, Ehcache configuration, and caching rules
+globs: "**/entities/lookups/**/*.java"
+alwaysApply: false
+---
+
+# Lookup Entities & Hibernate L2 Cache
+
+## Lookup Entity — Standard Lombok Stack
+
+```java
+@Entity
+@Immutable
+@Cacheable
+@Cache(usage = CacheConcurrencyStrategy.READ_ONLY)
+@Getter
+@NoArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@Table(name = "pp_pre_check_statuses")
+public class PreCheckStatusEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "pk_pre_check_status")
+    @EqualsAndHashCode.Include
+    private Long id;
+
+    @Column(name = "name", nullable = false)
+    private String name;
+
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+}
+```
+
+**Required annotations:**
+| Annotation | Why |
+|---|---|
+| `@Immutable` | Hibernate skips dirty checks, never generates UPDATE/DELETE |
+| `@Cacheable` | Marks entity as eligible for L2 caching |
+| `@Cache(usage = CacheConcurrencyStrategy.READ_ONLY)` | Most efficient strategy for immutable data |
+| `@Getter` | Read access only |
+| `@NoArgsConstructor` | Required by JPA |
+| `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` | Identity-based equality |
+
+**Forbidden:** `@Setter`, `@Data`, `@AllArgsConstructor`, `@Builder`
+
+**Do NOT** extend `BaseEntity` — lookup entities are static reference data, no audit timestamps.
+
+## Hibernate L2 Cache
+
+Only **lookup entities** are cached. Domain entities are NOT cached.
+
+### Required Cache Annotations
+Both `@Cacheable` (JPA) + `@Cache` (Hibernate) must be present:
+- `@Cacheable` tells the persistence provider the entity is cacheable
+- `@Cache(usage = READ_ONLY)` configures the strategy — matches `@Immutable`
+
+### Configuration (`application.properties`)
+```properties
+spring.jpa.properties.hibernate.cache.use_second_level_cache=true
+spring.jpa.properties.hibernate.cache.region.factory_class=jcache
+spring.jpa.properties.hibernate.javax.cache.uri=classpath:ehcache.xml
+spring.jpa.properties.hibernate.javax.cache.missing_cache_strategy=fail
+```
+
+`missing_cache_strategy=fail` — app refuses to start if a `@Cacheable` entity has no region in `ehcache.xml`. Prevents silently unbounded caches.
+
+### Ehcache Regions (`ehcache.xml`)
+Every `@Cacheable` lookup entity **must** have a `<cache>` region (alias = entity's FQCN).
+
+```xml
+<cache-template name="lookup-cache">
+    <heap unit="entries">500</heap>
+    <expiry><ttl unit="hours">1</ttl></expiry>
+</cache-template>
+
+<cache alias="com.arrise.daily_roster.entities.lookups.PreCheckStatusEntity"
+       uses-template="lookup-cache"/>
+```
+
+When adding a new lookup entity, **always add a corresponding `<cache>` region** — otherwise the app fails to start.

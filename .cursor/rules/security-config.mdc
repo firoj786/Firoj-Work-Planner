@@ -1,0 +1,45 @@
+---
+description: Security and authorization — Spring Security config, JWT authentication, and what NOT to do
+globs: "**/configs/Security*.java, **/interceptors/**/*.java, **/configs/JwtAuthentication.java"
+alwaysApply: false
+---
+
+# Security & Authorization
+
+## Core Principle
+**Use Spring Security's built-in features. Do NOT reinvent authorization.**
+
+## Method-Level Authorization
+- Use `@PreAuthorize` for role-based access control on controller methods
+- Enable via `@EnableMethodSecurity` on the security config class
+- Roles must be set as `GrantedAuthority` in the `Authentication` object
+
+```java
+// ✅ Correct — Spring's built-in annotation
+@PreAuthorize("hasAnyRole('WFM_TEAM_LEVEL_1', 'GP')")
+@GetMapping("/shifts")
+public ResponseEntity<ApiResponse<List<Shift>>> getShifts() { ... }
+
+// ❌ Wrong — custom annotation duplicating Spring
+@AuthorizedRoles({ApplicationRole.WFM_TEAM_LEVEL_1, ApplicationRole.GP})
+@GetMapping("/shifts")
+public ResponseEntity<ApiResponse<List<Shift>>> getShifts() { ... }
+```
+
+## JWT Authentication
+- Decode JWT and set `Authentication` in `SecurityContextHolder` with `GrantedAuthority` list
+- Spring Security handles authorization automatically via `@PreAuthorize`
+- No separate `RoleInterceptor` needed
+
+## Security Config Rules
+- `SessionCreationPolicy.STATELESS` — no server-side sessions for JWT APIs
+- Public/unauthenticated paths defined in `SecurityConstant.PUBLIC_PATHS`
+- JWT decoding wrapped in try-catch — never let decode exceptions bubble as 500
+- `AccessDeniedException` handled in `GlobalExceptionHandler` → returns 403, not 500
+- No sensitive headers (`Authorization`, `Cookie`) logged
+- Spring Security filter chain runs BEFORE interceptors
+
+## What NOT to Do
+- Do NOT create custom `@AuthorizedRoles`-style annotations
+- Do NOT write manual `RoleInterceptor` for JWT role checks
+- Do NOT bypass Spring Security's authorization chain with custom interceptors

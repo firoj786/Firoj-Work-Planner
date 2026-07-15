@@ -1,0 +1,92 @@
+---
+description: Verification before claiming work is done — run commands, read output, provide evidence
+alwaysApply: true
+---
+
+# Verification Before Completion
+
+## Core Principle
+
+**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.**
+
+"Should work," "looks correct," and "tests should pass" are not verification. Run the command, read the output, then state the result.
+
+## The Verification Gate
+
+Before claiming any work is complete, follow this sequence:
+
+1. **IDENTIFY** — What command proves this claim?
+2. **RUN** — Execute the command (fresh, not from memory)
+3. **READ** — Full output, check exit code, count failures/errors
+4. **VERIFY** — Does the output confirm the claim?
+   - If NO → state actual status with evidence
+   - If YES → state claim WITH evidence
+5. **ONLY THEN** — Make the claim
+
+Skip any step = unverified claim.
+
+## When to Verify
+
+**ALWAYS before:**
+- Saying "done", "complete", "fixed", "working", "ready"
+- Any expression of satisfaction ("looks good", "that should do it")
+- Committing code or creating PRs
+- Moving to the next task
+- Reporting a bug as fixed
+
+## Verification Commands for This Project
+
+| Claim | Verification Command | What to Check |
+|-------|---------------------|---------------|
+| Code compiles | `./gradlew compileJava` | Exit code 0, no errors |
+| Tests pass | `./gradlew test` | Exit code 0, 0 failures, 0 errors |
+| Full build passes | `./gradlew build` | Exit code 0 (includes compile + test + checks) |
+| No linter errors introduced | `ReadLints` on edited files | No new errors on files you changed |
+| Bug is fixed | Run the specific failing test | Test passes now; revert fix → test fails again |
+| Migration works | `./gradlew flywayMigrate` or app startup | No migration errors |
+| Endpoint works | Curl/Postman the endpoint | Expected status code and response body |
+
+## What Good Verification Looks Like
+
+**Correct:**
+```
+> ./gradlew test
+BUILD SUCCESSFUL — 47 tests passed, 0 failures
+
+All tests pass. ✓
+```
+
+**Wrong:**
+```
+"Tests should pass now"
+"The logic looks correct"
+"This should fix it"
+"I'm confident this works"
+```
+
+## Red Flags — STOP
+
+If you find yourself writing:
+- "should", "probably", "seems to", "looks like"
+- "I'm confident" (confidence ≠ evidence)
+- "Great!", "Perfect!", "Done!" before running verification
+- "Just this once I'll skip the check"
+- Relying on a previous run instead of a fresh one
+
+**ALL of these mean: STOP. Run the verification command first.**
+
+## After Fixing a Bug
+
+Bug fixes require a two-step verification:
+
+1. **Confirm the fix works** — run the specific test, see it pass
+2. **Confirm no regressions** — run the full test suite, see all tests pass
+
+Don't stop at step 1. A fix that breaks other tests is not a fix.
+
+## After Editing Multiple Files
+
+When a change touches multiple files:
+- `ReadLints` on EVERY edited file, not just the last one
+- Run the full build, not just compile
+- If the change touches entities or migrations, verify the app starts cleanly

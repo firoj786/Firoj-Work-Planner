@@ -1,0 +1,42 @@
+---
+description: Naming conventions for Java classes, entities, DTOs, enums, services, controllers, and external clients
+alwaysApply: true
+---
+
+# Naming Conventions
+
+## Java
+- Classes: `PascalCase` — `PreShiftCheck`, `ApiResponse`, `DateTimeUtils`
+- Methods/variables: `camelCase` — `rosterDate`, `nowUtc()`
+- Constants: `UPPER_SNAKE_CASE` — `MINUTES_IN_DAY`, `TIME_FORMATTER`
+- Packages: `lowercase` — `entities`, `dtos`, `services`
+
+## Entities & Tables
+- Entity class: singular noun — `TableSlot`, `EmployeeReadiness`
+- Table name: `pp_<plural_snake_case>` — `pp_table_slots`, `pp_employee_readiness`
+- Lookup entity: `<Name>Entity` suffix — `PreCheckStatusEntity`, `NotationTypeEntity`
+
+## DTOs
+- Request: `<Action><Entity>Request` — `CreatePreShiftCheckRequest`
+- Response: `<Entity>ResponseDto` — `PreShiftCheckResponseDto`
+- Use mutable classes (not records) — DTOs may be modified during algorithm-heavy processing
+
+## Enums
+- Enum class: singular noun — `PreCheckStatus`, `NotationType`
+- Enum constants: `UPPER_SNAKE_CASE` — `NOT_STARTED`, `IN_PROGRESS`
+
+## Services & Controllers
+- Service: `<Entity>Service` — `PreShiftCheckService`
+- Controller: `<Entity>Controller` — `PreShiftCheckController`
+- Repository: `<Entity>Repository` — `PreShiftCheckRepository`
+- Mapper: `<Entity>Mapper` — `PreShiftCheckMapper`
+
+## External Service Clients
+- Client: `<ServiceName>ServiceClient` — `EmployeeServiceClient`, `RosterServiceClient`
+- Name by **service**, not by entity — one client class per external service
+- DTOs: group under `dtos/<service-abbreviation>/` — `dtos/eis/`, `dtos/roster/`
+- Shared DTOs (e.g., `PagedResponse<T>`) live in root `dtos/` package
+
+## Database Columns
+- Primary key column: `pk_<entity>`
+- Foreign key column: `fk_<referenced_entity>`

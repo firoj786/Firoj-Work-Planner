@@ -1,0 +1,49 @@
+---
+description: HireWorkway AI — project context, tech stack, and development guidelines
+alwaysApply: true
+---
+
+# HireWorkway AI — Project Context
+
+AI-powered job search assistant: resume parsing, recruiter outreach, application tracking, and analytics.
+
+## Tech Stack
+- **Backend:** Java 21, Spring Boot 3.x, Gradle
+- **Database:** PostgreSQL (Flyway migrations)
+- **Cache:** Redis (Phase 2 — optional for MVP local dev)
+- **Frontend:** Next.js, React, TypeScript, Tailwind CSS
+- **AI:** OpenAI API (mock fallback when key absent)
+- **Storage:** Local filesystem for MVP; AWS S3 in production
+
+## Architecture
+Modular monolith with clear modules:
+- `auth` — JWT, email login, OTP, Google OAuth
+- `users` — profiles and subscriptions
+- `resume` — upload, parse, ATS scoring
+- `jobs` — search and management
+- `recruiters` — discovery and contact info
+- `outreach` — email generation, tracking, follow-ups
+- `analytics` — dashboard metrics
+
+## Package Structure
+```
+src/main/java/com/hirepilot/
+├── advices/
+├── clients/
+├── configs/
+├── constants/
+├── controllers/
+├── dtos/
+├── entities/
+├── exceptions/
+├── mappers/
+├── repositories/
+├── services/
+└── HirePilotApplication.java
+```
+
+## Development Guidelines
+- Follow all cursor rules (error handling, security, naming, Flyway, etc.)
+- MVP first — validate users before splitting into microservices
+- Use constructor injection via `@RequiredArgsConstructor` only
+- Inject `Clock` for all business time operations

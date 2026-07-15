@@ -1,0 +1,186 @@
+---
+description: Database query optimization — minimize DB round trips, push filtering to DB, avoid in-memory waste, and batch external calls
+globs: "**/services/**/*.java,**/repositories/**/*.java"
+alwaysApply: false
+---
+
+# Query & Data Fetching Optimization
+
+## Core Principle
+
+Every query should minimize: **rows scanned**, **columns returned**, **round trips to DB/external services**.
+Before writing any data-fetching code, ask:
+1. Can I push this filter/sort/limit to the DB instead of doing it in Java?
+2. Am I fetching data I already have from a previous step?
+3. Can I combine multiple queries into one?
+4. Am I fetching 500 rows when I only need 10?
+
+## Rule 1: Filter, Sort, and Limit in the Database — Not in Java
+
+Never load a large result set and trim it in-memory.
+
+```java
+// ❌ Fetches all rows, filters in Java
+List<PreShiftCheck> all = repository.findAll();
+List<PreShiftCheck> filtered = all.stream()
+        .filter(p -> p.getShiftCode() == ShiftCode.M)
+        .limit(10)
+        .toList();
+
+// ✅ DB does the work
+List<PreShiftCheck> filtered = repository.findTop10ByShiftCode(ShiftCode.M);
+```
+
+This includes LIMIT — if the API has a `limit` parameter, push it to the SQL query, not `stream().limit()` on a full result set.
+
+## Rule 2: Don't Fetch Data You Already Have
+
+If a previous step already loaded entity X, don't query the same table again to get X's fields.
+
+```java
+// ❌ Step 1 loads PreShiftCheck, Step 2 queries the same table for IDs
+PreShiftCheck pc = preShiftCheckRepository.getById(id);
+List<Long> siblingIds = preShiftCheckRepository.findIdsByStudioAndShift(pc.getStudioId(), pc.getShiftCode());
+long total = employeeReadinessRepository.countByPreShiftCheckIdIn(siblingIds);
+
+// ✅ Use the entity's fields directly in a JOIN query — skip the intermediate ID lookup
+long total = employeeReadinessRepository.countTotalForStudioShift(
+        pc.getStudioId(), pc.getShiftCode(), pc.getRosterDate());
+```
+
+**Real example from this project:** `buildSummary` was doing 3 queries (find sibling IDs → count total → count by status). Fixed to 2 queries by joining on `preShiftCheck.studioId/shiftCode/rosterDate` directly.
+
+## Rule 3: Scope External Service Calls to What You Actually Need
+
+When calling external services (EIS, roster), only request the entities that are relevant to the current context.
+
+```java
+// ❌ Fetches ALL studios from EIS, then filters in-memory
+List<StudioResponseDto> allStudios = employeeServiceClient.getStudios(Collections.emptyList());
+Set<String> matched = allStudios.stream().filter(s -> s.getName().contains(query)).collect(toSet());
+
+// ✅ First find which studios matter (from DB), then fetch only those from EIS
+List<String> activeStudioIds = preShiftCheckRepository.findDistinctStudioIds(today, statuses);
+List<StudioResponseDto> activeStudios = employeeServiceClient.getStudios(activeStudioIdsAsLong);
+Set<String> matched = activeStudios.stream().filter(s -> s.getName().contains(query)).collect(toSet());
+```
+
+**Real example:** `resolveStudioIds` was fetching all studios from EIS. Fixed to first get active studio IDs from DB, then fetch only those from EIS.
+
+## Rule 4: Prefer JOINs Over Sequential Queries
+
+Don't make Query 1 to get IDs, then Query 2 with `WHERE id IN (...)`. Let the DB join internally.
+
+```java
+// ❌ Two queries — find IDs, then use them
+List<Long> ids = parentRepository.findIdsByFilter(filter);
+List<ChildProjection> counts = childRepository.countByParentIdIn(ids);
+
+// ✅ One query — DB joins internally
+List<ChildProjection> counts = childRepository.countByParentFilter(filter);
+// JPQL: SELECT c.status, COUNT(c) FROM Child c WHERE c.parent.studioId = :studioId ...
+```
+
+## Rule 5: Use O(n) Grouping, Not O(n²) Filtering
+
+When grouping a loaded collection by a parent ID, build an index once — don't re-scan the list per parent.
+
+```java
+// ❌ O(teams × employees) — scans full list per team
+for (PreShiftCheck pc : preChecks) {
+    List<EmployeeReadiness> teamReadiness = allReadiness.stream()
+            .filter(er -> er.getPreShiftCheck().getId().equals(pc.getId()))
+            .toList();
+    readinessByTeam.put(pc.getTeamId(), teamReadiness);
+}
+
+// ✅ O(employees) — single pass to build index, then O(1) lookup
+Map<Long, List<EmployeeReadiness>> byPreCheckId = allReadiness.stream()
+        .collect(Collectors.groupingBy(er -> er.getPreShiftCheck().getId()));
+
+for (PreShiftCheck pc : preChecks) {
+    readinessByTeam.put(pc.getTeamId(),
+            byPreCheckId.getOrDefault(pc.getId(), Collections.emptyList()));
+}
+```
+
+## Rule 6: Use EXISTS for Presence Checks — Don't Load Entities
+
+```java
+// ❌ Loads entire entity just to check existence
+Optional<User> user = userRepository.findByEmail(email);
+if (user.isPresent()) { ... }
+
+// ✅ DB returns a boolean — no entity loaded
+boolean exists = userRepository.existsByEmail(email);
+```
+
+## Rule 7: Batch Operations — Never Loop Single Saves
+
+```java
+// ❌ 1000 inserts → 1000 queries
+for (StudioEmpId entry : newEntries) {
+    studioEmpIdRepository.save(entry);
+}
+
+// ✅ Single batch — Hibernate uses jdbc.batch_size
+studioEmpIdRepository.saveAll(newEntries);
+```
+
+Ensure `spring.jpa.properties.hibernate.jdbc.batch_size` is configured (this project uses 25).
+
+## Rule 8: Use JOIN FETCH for Eager Loading in Queries
+
+Avoid N+1 problems when you know you'll access a lazy association.
+
+```java
+// ❌ N+1 — loads reasons lazily per employee
+List<EmployeeReadiness> list = repository.findByPreShiftCheckIdIn(ids);
+for (EmployeeReadiness er : list) {
+    er.getReasons().size();  // triggers lazy load per entity
+}
+
+// ✅ Single query with JOIN FETCH
+@Query("SELECT DISTINCT er FROM EmployeeReadiness er " +
+       "LEFT JOIN FETCH er.reasons r LEFT JOIN FETCH r.reason " +
+       "WHERE er.preShiftCheck.id IN :ids")
+List<EmployeeReadiness> findWithReasonsByPreShiftCheckIdIn(@Param("ids") Collection<Long> ids);
+```
+
+## Rule 9: Select Only What You Need
+
+When you only need a count or a few fields, don't load full entities.
+
+```java
+// ❌ Loads full entities just to count
+List<EmployeeReadiness> all = repository.findByPreShiftCheckId(id);
+int total = all.size();
+
+// ✅ DB returns just the number
+long total = repository.countByPreShiftCheckId(id);
+
+// ❌ Loads full entities just to get IDs
+List<PreShiftCheck> checks = repository.findByStudioId(studioId);
+List<Long> ids = checks.stream().map(PreShiftCheck::getId).toList();
+
+// ✅ Select only the ID column
+@Query("SELECT p.id FROM PreShiftCheck p WHERE p.studioId = :studioId")
+List<Long> findIdsByStudioId(@Param("studioId") String studioId);
+```
+
+## Rule 10: Remove Dead Query Methods
+
+If a repository method is no longer called by any service, delete it. Dead queries:
+- Confuse future developers about what's used
+- Can mask the fact that a better query replaced them
+- Accumulate as tech debt
+
+## Query Cost Checklist (Before Every New Query)
+
+1. How many rows will this scan? Can I add WHERE conditions to reduce it?
+2. Is there an index supporting the WHERE columns?
+3. Am I selecting `*` when I only need 2 columns?
+4. Can I push LIMIT to the DB instead of Java `stream().limit()`?
+5. Can I merge this with another query in the same method?
+6. Am I querying the same table twice when one query could suffice?
+7. Am I calling an external service for more data than I need?

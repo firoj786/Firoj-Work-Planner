@@ -1,0 +1,82 @@
+---
+description: Error handling — response structure, custom exceptions, GlobalExceptionHandler, and error codes
+alwaysApply: true
+---
+
+# Error Handling
+
+## Response Structure
+- **Success:** `ApiResponse<T>` with `success`, `message`, `data`
+- **Error:** `ApiErrorResponse` with `success`, `status`, `errorCode`, `message`, `details`
+- **Validation:** `ErrorDetail` record for field-level error details
+- Do NOT add `timestamp` to response bodies — HTTP `Date` header handles this
+
+## Error Codes
+- Use `ErrorCode` enum in `constants/` for machine-readable error codes
+- FE switches on `errorCode` — never use hardcoded strings
+
+## Custom Exceptions
+
+| Exception | HTTP Status | Error Code |
+|---|---|---|
+| `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
+| `BadRequestException` | 400 | `INVALID_OPERATION` |
+| `ConflictException` | 409 | `DUPLICATE_RESOURCE` |
+| `ExternalServiceException` | 502 | `EXTERNAL_SERVICE_ERROR` |
+| `AccessDeniedException` (Spring) | 403 | `ACCESS_DENIED` |
+
+### Constructor Rules
+Every custom exception **must** have both constructors:
+1. `(String message)` — for simple throws
+2. `(String message, Throwable cause)` — for catch-and-rethrow (preserves root cause)
+
+```java
+// ✅ With cause — full chain preserved
+catch (DataIntegrityViolationException ex) {
+    throw new ConflictException("Duplicate roster", ex);
+}
+
+// ❌ Without cause — root cause lost
+catch (DataIntegrityViolationException ex) {
+    throw new ConflictException("Duplicate roster");
+}
+```
+
+## GlobalExceptionHandler Rules
+- Centralized in `advices/` using `@RestControllerAdvice`
+- **Must extend `ResponseEntityExceptionHandler`** — inherits default handlers for ~15 Spring MVC exceptions (`HttpMessageNotReadableException`, `HttpRequestMethodNotSupportedException`, `MissingServletRequestParameterException`, etc.). Without it, these exceptions bypass your handler and return a different response format than `ApiErrorResponse` — causing inconsistent error shapes.
+- Use `HttpStatus.value()` for status codes — never hardcode `404`, `400`
+- Log `warn` for 4xx, `error` with stack trace for 5xx
+- Generic `Exception` handler returns generic message — never leaks internals
+- Never expose stack traces to API consumers
+
+```java
+// ✅ Correct — extends ResponseEntityExceptionHandler for consistent error format
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+
+    // Override for custom validation error format
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+            MethodArgumentNotValidException ex, HttpHeaders headers,
+            HttpStatusCode status, WebRequest request) {
+        // return your ApiErrorResponse format
+    }
+
+    // Your custom exception handlers...
+}
+
+// ❌ Wrong — standalone handler misses Spring MVC built-in exceptions
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    // Spring MVC exceptions (malformed JSON, wrong HTTP method, etc.)
+    // get handled by Spring's default handler → different response format
+}
+```
+
+## Business Outcomes vs Errors
+- Errors (4xx/5xx): Something went wrong — use exceptions
+- Business outcomes (shortfall, capacity mismatch): Operation succeeded — return `200 OK` with `ApiResponse<T>`
+- Never throw exceptions for valid business results

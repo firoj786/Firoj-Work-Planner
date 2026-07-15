@@ -1,0 +1,145 @@
+---
+description: Spring Data JPA repository guidelines — query method preference, return types, and data access patterns
+globs: "**/repositories/**/*.java"
+alwaysApply: false
+---
+
+# Repository Guidelines
+
+## Core Principles
+- Repositories handle **data access only** — no business logic
+- Extend `JpaRepository<Entity, Long>` for standard CRUD operations
+- Return `Optional<T>` for single-entity lookups — forces null-safety at the call site
+
+## Query Approach — When to Use Which
+
+### 1. Derived Query Methods (default choice)
+Spring generates SQL from the method name. Use for simple lookups with 1-3 fixed conditions.
+
+```java
+Optional<PreShiftCheck> findByRosterDateAndTeamId(LocalDate rosterDate, Integer teamId);
+boolean existsByRosterDateAndTeamId(LocalDate date, Integer teamId);
+long countByPreShiftCheckId(Long preShiftCheckId);
+```
+
+**When:** equality checks, count, exists, simple findBy
+**Strengths:** compile-time safe (typo = build error), zero boilerplate, most readable
+**Limitations:** no GROUP BY, no aggregations, no OR conditions, no joins
+
+### 2. JPQL `@Query` + Projection Interface (aggregations and custom selects)
+Use for GROUP BY, COUNT/SUM/AVG, joins, or when you need a subset of columns.
+Return a **Projection Interface** — never `Object[]`.
+
+```java
+// Projection interface — getter names must match AS aliases
+public interface StatusCountProjection {
+    String getStatusName();
+    Long getCount();
+}
+
+// Repository — AS aliases map to projection getters
+@Query("SELECT er.status.name AS statusName, COUNT(er) AS count FROM EmployeeReadiness er " +
+       "WHERE er.preShiftCheck.id = :preCheckId AND er.status IS NOT NULL " +
+       "GROUP BY er.status.name")
+List<StatusCountProjection> countByStatus(@Param("preCheckId") Long preCheckId);
+```
+
+**When:** GROUP BY, aggregations, custom column selection, fixed complex conditions
+**Strengths:** type-safe results, no `Object[]` casting, clear intent
+**Limitations:** query string not compile-time checked, can't do dynamic conditions
+**Rule:** NEVER return `List<Object[]>` — always use a Projection Interface
+
+### 3. Specifications (dynamic WHERE clauses)
+Use when query conditions change based on user input (search/filter endpoints).
+Repository must extend `JpaSpecificationExecutor<Entity>`.
+
+```java
+// Specification class — one static method per filter
+public class PreShiftCheckSpecification {
+    public static Specification<PreShiftCheck> studioId(String studioId) {
+        return (root, query, cb) -> cb.equal(root.get("studioId"), studioId);
+    }
+    public static Specification<PreShiftCheck> rosterDate(LocalDate date) {
+        return (root, query, cb) -> cb.equal(root.get("rosterDate"), date);
+    }
+    public static Specification<PreShiftCheck> shiftCodeIn(List<ShiftCode> codes) {
+        return (root, query, cb) -> {
+            if (codes == null || codes.isEmpty()) return cb.conjunction();
+            return root.get("shiftCode").in(codes);
+        };
+    }
+}
+
+// Usage — compose dynamically based on which filters are present
+Specification<PreShiftCheck> spec = Specification.where(studioId("5"))
+        .and(rosterDate(LocalDate.now()))
+        .and(shiftCodeIn(filters.getShifts()));
+repo.findAll(spec, pageable);
+```
+
+**When:** search/filter endpoints with optional conditions, list APIs with dynamic filters
+**Strengths:** composable, reusable filter building blocks, pagination support
+**Limitations:** verbose, can't do GROUP BY or aggregations natively, harder to read for simple queries
+**Rule:** don't use for fixed queries — use derived or JPQL instead
+
+### 4. Native SQL `@Query(nativeQuery = true)` (last resort)
+Only for PostgreSQL-specific features that JPQL can't express.
+
+**When:** `jsonb` operators, `array_agg`, window functions, CTEs, `daterange` overlap
+**Rule:** avoid unless no JPQL alternative exists
+
+### Decision Flowchart
+
+```
+Is it a simple lookup (1-3 conditions, no aggregation)?
+  → YES: Derived query method
+
+Does it need GROUP BY, COUNT, SUM, or custom columns?
+  → YES: JPQL @Query + Projection Interface
+
+Do the WHERE conditions change based on user input?
+  → YES: Specification
+
+Does it need PostgreSQL-specific syntax?
+  → YES: Native SQL
+```
+
+## Convenience `default` Methods
+
+Use Java `default` methods in repository interfaces for common "get or throw" lookups. This eliminates repetitive `.orElseThrow()` boilerplate in every service method.
+
+```java
+public interface PreShiftCheckRepository extends JpaRepository<PreShiftCheck, Long> {
+
+    // Standard Spring Data methods return Optional
+    Optional<PreShiftCheck> findByRosterDateAndTeamId(LocalDate rosterDate, Integer teamId);
+
+    // Convenience: get or throw — defined once, reused across all services
+    default PreShiftCheck getById(Long id) {
+        return findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pre-shift check not found: " + id));
+    }
+
+    default PreShiftCheck getByRosterDateAndTeamId(LocalDate rosterDate, Integer teamId) {
+        return findByRosterDateAndTeamId(rosterDate, teamId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Pre-shift check not found for date: " + rosterDate + ", team: " + teamId));
+    }
+}
+```
+
+**Why this pattern:**
+- Error message is consistent per entity — defined once in the repository, not scattered across services
+- Services call `repository.getById(id)` instead of repeating the same `.orElseThrow()` lambda
+- `findBy...` (returns `Optional`) still available for cases where absence is expected (e.g., checking before create)
+
+**Naming convention:** `getBy...` for methods that throw on not found, `findBy...` for methods that return `Optional`
+
+## Rules
+- Prefer derived methods over `@Query` for readability and compile-time safety
+- Use `@Param` for named parameters in `@Query` — never use positional (`?1`, `?2`)
+- Return `Optional<T>` for `findBy...` returning a single entity
+- Return `List<T>` for multiple results (empty list if none, never null)
+- Use `existsBy...` for existence checks — more efficient than `findBy` + null check
+- Use `default` `getBy...` methods for "get or throw ResourceNotFoundException" lookups
+- No business logic in repositories — filtering/grouping beyond SQL belongs in services

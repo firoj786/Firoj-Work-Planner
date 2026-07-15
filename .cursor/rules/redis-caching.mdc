@@ -1,0 +1,74 @@
+---
+description: Redis caching strategy — Spring Cache with Redis backing, event-driven eviction, and graceful degradation
+globs: "**/services/**/*.java,**/configs/RedisCache*.java"
+alwaysApply: false
+---
+
+# Redis Caching Strategy
+
+## Two Cache Layers (No Overlap)
+- **Hibernate L2 Cache (Ehcache)**: Entity-by-PK lookups for `@Immutable` lookup entities only
+- **Spring Cache (Redis)**: Service-level query results — DTOs, primitives, simple lists
+- These complement each other. Never put JPA entities in Redis.
+
+## Core Rules
+
+### Where Annotations Live
+- `@Cacheable` → only in `CacheableDataService`
+- `@CacheEvict` → only in `CacheEvictionService`
+- NEVER on repositories or business services
+- Why: avoids self-invocation (Spring AOP proxy bypass) and keeps caching visible
+
+### What Gets Cached
+- ONLY primitives, strings, and simple lists (e.g., `List<String>`)
+- NEVER JPA entities — Hibernate proxies don't serialize safely to JSON
+- NEVER mutable data that changes on every request (e.g., `EmployeeReadiness`, `PreShiftCheck`)
+
+### Eviction Strategy
+- **Primary:** Event-driven — `@CacheEvict` called by write operations
+- **Safety net:** 24-hour TTL — guarantees eventual consistency if eviction is missed
+- Every cache MUST have a documented eviction trigger in `CacheEvictionService`
+- Rule: if you write data that backs a cache, you MUST call the eviction method
+
+### Adding a New Cache
+1. Add `cache.ttl.{name}={seconds}` in `application.properties`
+2. Add `@Cacheable(value = "{name}", key = "...")` method in `CacheableDataService`
+3. Add `@CacheEvict` method in `CacheEvictionService`
+4. No changes to `RedisCacheConfig` — TTL is read dynamically from `CacheProperties`
+
+### sync=true
+- Use on caches with high concurrent access (multiple users requesting same key simultaneously)
+- Prevents thundering herd — only one thread loads from DB on cache miss
+
+### Serialization
+- JSON via `GenericJackson2JsonRedisSerializer` — NOT Java serialization
+- Keys via `StringRedisSerializer`
+- All keys prefixed with `daily-roster:` for namespace isolation
+
+### Graceful Degradation
+- `CacheErrorHandler` logs warnings and falls through to DB when Redis is down
+- Application MUST continue working without cache — Redis is an optimization, not a dependency
+
+### Key Naming
+- Single-entry caches: `key = "'all'"`
+- Multi-entry caches: `key = "#field1 + ':' + #field2 + ':' + #field3"`
+- Keys must be human-readable in `redis-cli`
+- No default `SimpleKey` — always specify explicit `key`
+
+### Metrics
+- `enableStatistics()` on `RedisCacheManager`
+- Actuator: `/actuator/caches`, `/actuator/metrics/cache.gets`
+- Monitor hit rate — if below 80%, reconsider the cache
+
+## Cache Inventory
+
+| Cache                          | Key                    | TTL | sync | Eviction Trigger                                                                                  |
+| ------------------------------ | ---------------------- | --- | ---- | ------------------------------------------------------------------------------------------------- |
+| `readiness-statuses`           | `'all'`                | 24h | true | `CacheEvictionService.evictReadinessStatuses()` — when `NotationConfig` changes                   |
+| `fs-studio-auth`               | `empId:studioId:date`  | 24h | false | `CacheEvictionService.evictFsStudioAssignment()` / `evictAllFsStudioAssignments()` — when `StudioEmpId` changes |
+| `notation-configs`             | `NotationType.name()`  | 24h | true | `CacheEvictionService.evictNotationConfigs()` — when `NotationConfig` is created/updated/deactivated |
+| `roster-snapshot-employees`    | `#rosterId` (Long)     | 24h | true | `CacheEvictionService.evictRosterSnapshots(rosterId)` — written atomically by `AllocationSnapshotService.createSnapshot` |
+| `roster-snapshot-restriction-map` | `#rosterId` (Long)  | 24h | true | `CacheEvictionService.evictRosterSnapshots(rosterId)` — same write boundary as employees (String employeeId → restriction; canonical restriction snapshot) |
+| `roster-snapshot-studios`      | `#rosterId` (Long)     | 24h | true | `CacheEvictionService.evictRosterSnapshots(rosterId)` — same write boundary as employees           |
+| `roster-snapshot-tables`       | `#rosterId` (Long)     | 24h | true | `CacheEvictionService.evictRosterSnapshots(rosterId)` — same write boundary as employees           |
+| `roster-snapshot-floor-travel-times` | `#rosterId` (Long) | 24h | true | `CacheEvictionService.evictRosterSnapshots(rosterId)` — same write boundary as employees           |

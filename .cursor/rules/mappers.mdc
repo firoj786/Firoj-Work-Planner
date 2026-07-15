@@ -1,0 +1,45 @@
+---
+description: MapStruct mapper conventions — entity-DTO mapping, partial updates, and best practices
+globs: "**/mappers/**/*.java"
+alwaysApply: false
+---
+
+# Mapping Strategy — MapStruct
+
+## Core Rules
+- Use **MapStruct** for DTO ↔ Entity mapping
+- Avoid mapping logic inside controllers
+- Never expose JPA entities outside the persistence layer
+
+## Standard Mapper Pattern
+
+```java
+@Mapper(componentModel = "spring")
+public interface EmployeeMapper {
+
+    // Entity → Response DTO
+    EmployeeResponseDto toDto(Employee entity);
+
+    // Request DTO → Entity
+    Employee toEntity(EmployeeRequestDto dto);
+
+    // List mapping (auto-generated)
+    List<EmployeeResponseDto> toDtoList(List<Employee> entities);
+
+    // Custom field mapping
+    @Mapping(source = "teamId", target = "team.id")
+    @Mapping(target = "createdAt", ignore = true)
+    Employee toEntity(CreateEmployeeRequest dto);
+
+    // Update existing entity (partial update)
+    @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
+    void updateEntityFromDto(UpdateEmployeeRequest dto, @MappingTarget Employee entity);
+}
+```
+
+## Best Practices
+- Use `componentModel = "spring"` for Spring integration
+- Use `@Mapping` for field name mismatches
+- Use `@MappingTarget` for updating existing entities
+- Use `nullValuePropertyMappingStrategy = IGNORE` for partial updates
+- Keep mappers in the `mappers/` package

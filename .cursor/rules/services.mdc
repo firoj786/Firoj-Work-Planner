@@ -1,0 +1,53 @@
+---
+description: Service layer guidelines — business logic, @Transactional usage, exception throwing, and service boundaries
+globs: "**/services/**/*.java"
+alwaysApply: false
+---
+
+# Service Layer Guidelines
+
+## Core Principles
+- Services contain **all business logic** — the brain of the application
+- Services orchestrate: call repositories for data, call clients for external data, apply business rules
+- Controllers never call repositories or clients directly — always through services
+- One service can call another, but avoid circular dependencies
+
+## `@Transactional` Best Practices
+- Use `@Transactional` at **method level**, not class level
+- Use `@Transactional(readOnly = true)` for read-only operations — Hibernate skips dirty checks
+- Default propagation (`REQUIRED`) is fine for most cases
+- Never put `@Transactional` on `private` methods — Spring proxies can't intercept them
+
+```java
+@Service
+@RequiredArgsConstructor
+public class PreShiftCheckService {
+    private final PreShiftCheckRepository preShiftCheckRepository;
+    private final PreShiftCheckMapper preShiftCheckMapper;
+
+    @Transactional(readOnly = true)
+    public PreShiftCheckResponseDto getById(Long id) {
+        PreShiftCheck entity = preShiftCheckRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Pre-shift check not found: " + id));
+        return preShiftCheckMapper.toDto(entity);
+    }
+
+    @Transactional
+    public PreShiftCheckResponseDto create(CreatePreShiftCheckRequest request) {
+        PreShiftCheck entity = preShiftCheckMapper.toEntity(request);
+        PreShiftCheck saved = preShiftCheckRepository.save(entity);
+        return preShiftCheckMapper.toDto(saved);
+    }
+}
+```
+
+## Exception Throwing Guide
+- `ResourceNotFoundException` — entity not found by ID or unique key
+- `BadRequestException` — input passes validation but fails business rules
+- `ConflictException` — duplicate resource or state conflict
+- Let `ExternalServiceException` bubble up from clients unless handling partial failures
+
+## What Does NOT Belong in Services
+- HTTP-specific concerns (`HttpStatus`, `ResponseEntity`, `HttpServletRequest`)
+- Direct JSON parsing or serialization
+- Logging request/response payloads (that's the filter's job)

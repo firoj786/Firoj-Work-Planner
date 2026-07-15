@@ -1,0 +1,33 @@
+---
+description: Flyway schema management — migration conventions, what Flyway owns, and why not @Index
+globs: "**/db/migration/**/*.sql"
+alwaysApply: false
+---
+
+# Schema Management & Flyway
+
+**Flyway owns the schema. Hibernate only validates it.**
+
+## Core Principles
+- All schema changes (tables, indexes, constraints, seed data) MUST be in Flyway migrations
+- Hibernate must NOT create or modify schema — use `ddl-auto=validate` in production
+- Never use `@Index` in JPA entities — define indexes in Flyway migrations
+- Lookup table seed data (enum values) should be inserted via Flyway migrations
+
+## What Flyway Manages
+- Table creation and alterations
+- Index creation (including partial, expression, and concurrent indexes)
+- Constraints (unique, check, foreign key)
+- Seed data for lookup/enum tables
+- Any PostgreSQL-specific DDL
+
+## Why Not `@Index` in Entities
+- `@Index` only works with `ddl-auto=create/update` (unsafe for production)
+- Cannot express PostgreSQL-specific indexes (partial, expression, concurrent)
+- No version history or audit trail
+- Not reviewable by DBAs
+
+## Migration File Convention
+- Location: `src/main/resources/db/migration/`
+- Naming: `V<version>__<description>.sql` (e.g., `V1__create_tables.sql`, `V2__add_indexes.sql`)
+- Each migration is immutable once applied — never edit existing migrations

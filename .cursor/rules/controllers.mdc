@@ -1,0 +1,78 @@
+---
+description: REST controller guidelines — thin controllers, security annotations, response patterns, and HTTP standards
+globs: "**/controllers/**/*.java"
+alwaysApply: false
+---
+
+# Controller Guidelines
+
+## Core Principles
+- Controllers are **thin** — receive request, validate, delegate to service, return response
+- No business logic in controllers — that belongs in services
+- No direct repository or client calls from controllers — always go through services
+- All endpoints under `/api/v1/`
+
+## Standard Controller Pattern
+
+```java
+@RestController
+@RequestMapping("/api/v1/pre-shift-checks")
+@RequiredArgsConstructor
+public class PreShiftCheckController {
+    private final PreShiftCheckService preShiftCheckService;
+
+    @PreAuthorize("hasAnyRole('WFM_TEAM_LEVEL_1', 'GP')")
+    @PostMapping
+    public ResponseEntity<ApiResponse<PreShiftCheckResponseDto>> create(
+            @Valid @RequestBody CreatePreShiftCheckRequest request) {
+        PreShiftCheckResponseDto result = preShiftCheckService.create(request);
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(ApiResponse.success(result, "Pre-shift check created"));
+    }
+
+    @PreAuthorize("hasRole('WFM_TEAM_LEVEL_1')")
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<PreShiftCheckResponseDto>> getById(@PathVariable Long id) {
+        PreShiftCheckResponseDto result = preShiftCheckService.getById(id);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+}
+```
+
+## Rules
+- Always return `ResponseEntity<ApiResponse<T>>` for success responses
+- Use `@PreAuthorize` on every protected endpoint — never forget role checks
+- If all endpoints in a controller share the same role set, use `@PreAuthorize` at **class level** — avoid repeating on every method
+- Use `@Valid` on `@RequestBody` parameters — without it, Bean Validation is silently ignored
+- Use `@Valid` on **nested DTO fields** to cascade validation — without it, validation stops at the first level
+- HTTP status codes: `200 OK` for reads/updates, `201 CREATED` for creation, `204 NO_CONTENT` for deletes
+- Use `@PathVariable` for resource identifiers, `@RequestParam` for filters
+- Use `@RequestHeader(required = false)` for optional headers — no custom resolvers
+
+## Validation Annotations
+- Every `@NotNull`, `@NotBlank`, `@Size`, `@Min`, `@Max`, etc. **must** have a `message` attribute — Spring defaults like `"must not be blank"` are not user-friendly
+- Use annotation-based validation (`jakarta.validation.constraints`) — not manual `if` checks in controllers
+
+```java
+// ✅ Correct — every annotation has a message
+@NotNull(message = "Pre-check ID is required")
+private Long preCheckId;
+
+@NotBlank(message = "Employee ID is required")
+private String employeeId;
+
+// ✅ Correct — @Valid cascades validation into nested DTO
+@Valid
+@NotNull(message = "Address is required")
+private AddressDto address;
+
+// ❌ Wrong — no message, Spring shows "must not be blank"
+@NotBlank
+private String employeeId;
+```
+
+## Security on Endpoints
+- Use `@PreAuthorize` (Spring Security) — do NOT create custom `@AuthorizedRoles` annotations
+- Roles must be set as `GrantedAuthority` in `Authentication` object
+- Enable via `@EnableMethodSecurity` on security config class

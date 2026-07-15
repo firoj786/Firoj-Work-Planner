@@ -1,0 +1,214 @@
+---
+description: Testing standards — JUnit 5, Mockito, test structure, naming, and what to test per layer
+globs: "**/test/**/*.java"
+alwaysApply: false
+---
+
+# Testing Standards
+
+## Test Workflow
+1. **Design test cases first** — list all scenarios (happy path, edge cases, error cases) before writing code
+2. **Developer reviews the test plan** — confirms coverage before implementation
+3. **Implement tests** — write tests following the patterns below
+4. This prevents regression — if a test plan is reviewed upfront, all corner cases are captured once
+
+## Test Structure — Arrange-Act-Assert (AAA)
+Every test method follows three sections:
+
+```java
+@Test
+void existingIdReturnsPreShiftCheck() {
+    // Arrange
+    PreShiftCheck entity = new PreShiftCheck();
+    entity.setId(1L);
+    when(repository.getById(1L)).thenReturn(entity);
+
+    // Act
+    PreShiftCheckResponseDto result = service.getById(1L);
+
+    // Assert
+    assertNotNull(result);
+    assertEquals(1L, result.getId());
+}
+```
+
+## Naming Convention
+Pattern: `camelCase` — method name describes the scenario and expected outcome in a single readable phrase.
+
+Inside `@Nested` classes, the operation name is already provided by the class, so the test method describes the **condition + expected result**.
+
+```java
+// ✅ Clear intent — camelCase, descriptive
+@Nested class GetById {
+    void existingIdReturnsDto()
+    void nonExistentIdThrowsResourceNotFoundException()
+}
+
+@Nested class Create {
+    void validRequestSavesAndReturnsDto()
+    void duplicateRosterDateThrowsConflictException()
+}
+
+// ❌ Vague
+void testCreate()
+void happyPath()
+void errorCase()
+```
+
+## Grouping with @Nested (Mandatory)
+**Always** group related tests by operation using `@Nested` classes. This is not optional — every test class with more than one operation must use `@Nested`.
+
+**Why:** Flat test classes become unreadable at 10+ tests. `@Nested` gives structure in both code and test reports (e.g., `Post > clientErrorThrowsExternalServiceException`). JUnit 5 runs each nested class with its own lifecycle, improving test isolation.
+
+```java
+class PreShiftCheckServiceTest {
+
+    @Nested
+    class GetById {
+        @Test void existingIdReturnsDto() { /* ... */ }
+        @Test void nonExistentIdThrowsResourceNotFoundException() { /* ... */ }
+    }
+
+    @Nested
+    class Create {
+        @Test void validRequestSavesAndReturnsDto() { /* ... */ }
+        @Test void duplicateDateThrowsConflictException() { /* ... */ }
+    }
+}
+```
+
+## Unit Tests — Services (Mockito)
+Mock all dependencies. No Spring context needed.
+
+```java
+@ExtendWith(MockitoExtension.class)
+class PreShiftCheckServiceTest {
+
+    @Mock
+    private PreShiftCheckRepository preShiftCheckRepository;
+
+    @Mock
+    private PreShiftCheckMapper preShiftCheckMapper;
+
+    @InjectMocks
+    private PreShiftCheckService preShiftCheckService;
+
+    @Test
+    void existingIdReturnsDto() {
+        // Arrange
+        PreShiftCheck entity = new PreShiftCheck();
+        PreShiftCheckResponseDto dto = new PreShiftCheckResponseDto();
+        when(preShiftCheckRepository.getById(1L)).thenReturn(entity);
+        when(preShiftCheckMapper.toDto(entity)).thenReturn(dto);
+
+        // Act
+        PreShiftCheckResponseDto result = preShiftCheckService.getById(1L);
+
+        // Assert
+        assertNotNull(result);
+        verify(preShiftCheckRepository).getById(1L);
+        verify(preShiftCheckMapper).toDto(entity);
+    }
+}
+```
+
+**Rules:**
+- Use `@ExtendWith(MockitoExtension.class)` — NOT `MockitoAnnotations.openMocks(this)`
+- Use `@Mock` for dependencies, `@InjectMocks` for the class under test
+- `verify()` to confirm interactions with mocks
+- One logical assertion per test — test one behavior, not multiple unrelated outcomes
+- Name `@AfterEach` methods by what they do (e.g., `clearSecurityContext`) — not generic `tearDown`
+
+## Unit Tests — Utilities
+Test utility methods with `@ParameterizedTest` for multiple inputs:
+
+```java
+class DateTimeUtilsTest {
+
+    @ParameterizedTest
+    @CsvSource({
+        "08:00, 16:00, 480",
+        "22:00, 06:00, 480",
+        "00:00, 00:00, 1440"
+    })
+    void variousInputsReturnsCorrectDuration(
+            String start, String end, long expectedMinutes) {
+        LocalTime startTime = LocalTime.parse(start);
+        LocalTime endTime = LocalTime.parse(end);
+        assertEquals(expectedMinutes, DateTimeUtils.durationMinutes(startTime, endTime));
+    }
+
+    @Test
+    void startAfterEndThrowsIllegalArgumentException() {
+        ZonedDateTime start = ZonedDateTime.parse("2026-02-17T10:00:00Z");
+        ZonedDateTime end = ZonedDateTime.parse("2026-02-17T08:00:00Z");
+        assertThrows(IllegalArgumentException.class,
+                () -> DateTimeUtils.durationMinutes(start, end));
+    }
+}
+```
+
+## Integration Tests — Repositories
+Use `@DataJpaTest` with Testcontainers for real DB:
+
+```java
+@DataJpaTest
+@Testcontainers
+class PreShiftCheckRepositoryTest {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
+
+    @Autowired
+    private PreShiftCheckRepository repository;
+
+    @Test
+    void existingRecordReturnsEntity() {
+        // Test with real DB operations
+    }
+}
+```
+
+## What to Test Per Layer
+
+| Layer | What to Test | How |
+|---|---|---|
+| **Services** | Business logic, exception throwing, correct delegation to repos/clients | Unit test with Mockito mocks |
+| **Utilities** | All public methods, edge cases, boundary values | Unit test, `@ParameterizedTest` |
+| **Repositories** | Custom queries (`@Query`), derived method correctness | Integration test with `@DataJpaTest` + Testcontainers |
+| **Mappers** | Field mapping correctness, null handling | Unit test (MapStruct generates code — test the generated mapper) |
+| **Clients** | NOT unit tested directly — tested indirectly via service tests that mock them | Mock in service tests |
+| **Controllers** | NOT unit tested — tested via integration tests or manual/Postman testing | Skip for now |
+
+## Parameterized Tests for Data-Driven Scenarios
+Use `@ParameterizedTest` to avoid duplicating test logic for different inputs — especially useful for algorithm-heavy code (shift calculations, time overlaps, duration computations).
+
+```java
+@ParameterizedTest(name = "timeRangesOverlap({0}-{1}, {2}-{3}) = {4}")
+@CsvSource({
+    "08:00, 16:00, 12:00, 20:00, true",
+    "08:00, 16:00, 16:00, 20:00, false",
+    "22:00, 06:00, 01:00, 03:00, true"
+})
+void variousRangesReturnsExpected(
+        String s1, String e1, String s2, String e2, boolean expected) {
+    assertEquals(expected, DateTimeUtils.timeRangesOverlap(
+            LocalTime.parse(s1), LocalTime.parse(e1),
+            LocalTime.parse(s2), LocalTime.parse(e2)));
+}
+```
+
+## Test Data
+- Use **realistic test objects** as request bodies — `Map.of("teamId", 10, "shift", "M")` instead of bare strings like `"body"`
+- Define reusable test data as `private static final` constants at the top of the test class
+- **Environment-like values** (base URLs, service names) go in a **test config properties file** under `src/test/resources/` — load via static initializer block, not hardcoded in the test class
+
+
+## Anti-Patterns to Avoid
+- **Don't duplicate production logic in tests** — hard-code expected values, don't recompute them
+- **Don't use `Thread.sleep()`** — mock async behavior in unit tests
+- **Don't test private methods** — test through public API
+- **Don't ignore failing tests with `@Disabled`** — fix or delete them
+- **Don't rely on test execution order** — each test must be independent
+- **Don't use real external services** — mock `RestTemplate` calls in service client tests
+- **Don't use bare strings as request bodies** — `"body"` tells the reader nothing; use `Map.of(...)` or actual DTO instances

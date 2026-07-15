@@ -1,0 +1,112 @@
+---
+description: Java 17 standards, Spring Boot best practices, dependency injection, design patterns, logging, and code comments
+globs: "**/*.java"
+alwaysApply: false
+---
+
+# Java & Spring Standards
+
+## Java 17
+- Java 17 features allowed (records, switch expressions where appropriate)
+- Use `Optional` thoughtfully (never for fields, only for return types)
+- Prefer immutability where possible
+- Use Lombok sparingly and consciously (`@Getter`, `@Setter`, `@Slf4j`, `@RequiredArgsConstructor` where needed)
+
+## Dependency Injection
+
+### Standard: Constructor Injection via `@RequiredArgsConstructor`
+- Declare dependencies as `private final` fields
+- Use Lombok `@RequiredArgsConstructor` to generate the constructor
+- This ensures immutability, testability, and makes dependencies explicit
+
+### `@Autowired` is NOT Allowed
+- Do NOT use `@Autowired` (field injection) anywhere in this project
+- If you see `@Autowired` in existing code, refactor it to constructor injection
+
+```java
+// ✅ Correct
+@Service
+@RequiredArgsConstructor
+public class PreShiftCheckService {
+    private final PreShiftCheckRepository preShiftCheckRepository;
+    private final PreShiftCheckMapper preShiftCheckMapper;
+}
+
+// ❌ Wrong — field injection
+@Service
+public class PreShiftCheckService {
+    @Autowired
+    private PreShiftCheckRepository preShiftCheckRepository;
+}
+```
+
+### Circular Dependency Handling
+Preferred solutions (in order):
+1. Refactor responsibilities
+2. Introduce interfaces or ports
+3. Re-evaluate service boundaries
+
+`@Lazy` is allowed ONLY when circular dependency is unavoidable, not required at startup, and documented clearly.
+
+## Time & Timezone
+- **NEVER** use `ZonedDateTime.now()`, `LocalDate.now()`, `LocalTime.now()`, or `Instant.now()` directly
+- Always inject the `Clock` bean and use `ZonedDateTime.now(clock)`, `LocalDate.now(clock)`, etc.
+- The `Clock` bean is configured per-deployment via `application.timezone` (e.g., `Europe/Bucharest`, `Asia/Kolkata`)
+- DB audit timestamps (`@CreationTimestamp`, `@UpdateTimestamp`) remain UTC via Hibernate config — `Clock` is for business logic only
+- This ensures: correct timezone per country, testability (inject `Clock.fixed()` in tests)
+
+```java
+// ✅ Correct — uses injected Clock
+private final Clock clock;
+ZonedDateTime.now(clock)
+
+// ❌ Wrong — uses JVM default timezone
+ZonedDateTime.now()
+```
+
+## Spring Best Practices
+- Use `@Service`, `@Repository`, `@RestController` appropriately
+- Avoid unnecessary `@Component`
+- No double bean registration — if a filter/interceptor uses `@Component`, don't also register it via `FilterRegistrationBean`
+
+## Design Patterns
+Apply patterns **only when they solve a real problem**. Patterns are tools, not defaults.
+
+- **Strategy Pattern** — preferred when business behavior varies by type, region, or rule. Avoid growing conditionals.
+- **Factory Pattern** — only when object creation logic is complex or varies by input. Not for simple instantiation.
+- **Singleton Pattern** — do NOT implement manually. Spring beans are singletons by default.
+
+## Logging & Observability
+- Use SLF4J logging (`@Slf4j`)
+- Log at service boundaries
+- No excessive logging inside loops
+- `log.debug` for per-request tracing, `log.info` for lifecycle/business events
+- `log.warn` for 4xx, `log.error` with stack trace for 5xx
+- Request/response body logging truncated (max 1KB)
+
+## Utility / Shared Methods
+- Validate inputs with precondition checks — throw `IllegalArgumentException` for invalid arguments
+- Fail fast — don't return silently wrong results (e.g., negative durations, null collections)
+- Utility classes should be `final` with a private constructor (prevent instantiation)
+
+```java
+// ✅ Correct — validates before computing
+public static long durationMinutes(ZonedDateTime start, ZonedDateTime end) {
+    if (start.isAfter(end)) {
+        throw new IllegalArgumentException(
+                String.format("start (%s) must not be after end (%s)", start, end));
+    }
+    return Duration.between(start, end).toMinutes();
+}
+
+// ❌ Wrong — silently returns negative value
+public static long durationMinutes(ZonedDateTime start, ZonedDateTime end) {
+    return Duration.between(start, end).toMinutes();
+}
+```
+
+## Code Comments & Documentation
+- Explain **WHY**, not **WHAT** — code should be self-explanatory
+- Mandatory comments for complex business logic (scheduling, payroll, compliance)
+- Public methods must have **Javadoc** (`@param`, `@return`)
+- No commented-out code — use version control

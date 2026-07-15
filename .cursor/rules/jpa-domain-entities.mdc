@@ -1,0 +1,91 @@
+---
+description: JPA domain entity standards — Lombok annotations, BaseEntity auditing, enum handling, and column definitions
+globs: "**/entities/**/*.java"
+alwaysApply: false
+---
+
+# JPA Domain Entities
+
+## Core JPA Rules
+- Table prefix: `pp_`
+- Use database sequence for primary keys (`@GeneratedValue(strategy = GenerationType.SEQUENCE)`) with `@SequenceGenerator(allocationSize = 25)` — enables Hibernate batch inserts
+- Use `ZonedDateTime` (UTC) for system timestamps, `LocalDate` for calendar dates
+- Do NOT define indexes via `@Index` — indexes are managed by Flyway
+- Do NOT use `@Column(length = ...)` — Flyway migrations define column sizes
+- `@Column` should carry: `name` (always), `nullable` (when needed), `columnDefinition` (for TEXT) — nothing else
+- Avoid bidirectional relationships unless necessary
+- No business logic inside entities
+
+## Lombok — Standard Domain Entity Stack
+
+**Never use `@Data` on JPA entities** — it generates wrong `equals()`/`hashCode()`/`toString()` for lazy-loaded proxies.
+
+```java
+@Entity
+@Table(name = "pp_table_slots")
+@Getter
+@Setter
+@NoArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true, callSuper = false)
+public class TableSlot extends BaseEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "table_slot_seq")
+    @SequenceGenerator(name = "table_slot_seq", sequenceName = "pp_table_slot_seq", allocationSize = 25)
+    @Column(name = "pk_table_slot")
+    @EqualsAndHashCode.Include
+    private Long id;
+}
+```
+
+**Required:** `@Getter`, `@Setter`, `@NoArgsConstructor`, `@EqualsAndHashCode(onlyExplicitlyIncluded = true, callSuper = false)`, `@EqualsAndHashCode.Include` on `@Id`
+
+**Forbidden:** `@Data`, `@AllArgsConstructor` (unless concrete need), `@ToString` without `@ToString.Exclude` on lazy associations
+
+**Why `callSuper = false`:** `BaseEntity` has `createdAt`/`updatedAt` — timestamps should NOT affect equality.
+
+## BaseEntity Auditing
+
+All domain entities **must** extend `BaseEntity` — do NOT manually add `createdAt`/`updatedAt` fields.
+
+- `@CreationTimestamp` / `@UpdateTimestamp` handle timestamps automatically
+- UTC configured globally via `spring.jpa.properties.hibernate.jdbc.time_zone=UTC`
+- Do NOT write `@PrePersist` / `@PreUpdate` callbacks
+- Do NOT use `ZoneOffset.UTC` or `ZonedDateTime.now(ZoneOffset.UTC)` in entities
+- Lookup entities (`entities/lookups/`) do NOT extend `BaseEntity`
+
+## Enum Handling (Dual-Layer Pattern)
+
+**Internal enums** (statuses, types owned by this service):
+- DB lookup table entity (`pp_<enum>s`) with `id`, `name`, `description`
+- Java enum with `getEnum(String)` method
+- Reference via FK (`@ManyToOne`) — do NOT use `@Enumerated(EnumType.STRING)`
+
+**External enums** (from other services like `ShiftCode`):
+- Use `@Enumerated(EnumType.STRING)` — no lookup table needed
+
+### Enum Design — Avoid Redundant `value` Fields
+Use `name()` when the string representation == constant name. Only add a `value` field when the string differs (spaces, special chars).
+
+```java
+// ✅ No value field needed
+public enum Gender {
+    MALE, FEMALE, MIXED;
+    public static Optional<Gender> getEnum(String value) {
+        for (Gender g : Gender.values()) {
+            if (g.name().equalsIgnoreCase(value)) return Optional.of(g);
+        }
+        return Optional.empty();
+    }
+}
+
+// ✅ Value field needed — string differs from name
+@Getter
+public enum ApplicationRole {
+    WFM_TEAM_LEVEL_1("WFM TEAM LEVEL 1"), GP("GP");
+    private final String value;
+    ApplicationRole(String value) { this.value = value; }
+}
+```
+
+## Transaction Boundaries
+Transaction rules are defined in the **Service Layer Guidelines** (`services.mdc`) — transactions are a service concern, not an entity concern.

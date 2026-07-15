@@ -1,0 +1,173 @@
+---
+description: Systematic debugging process — root cause first, no guessing, evidence-based fixes
+alwaysApply: false
+---
+
+# Systematic Debugging
+
+## Core Principle
+
+**NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.**
+
+Random fixes waste time and create new bugs. Quick patches mask underlying issues. Always find the root cause before attempting a fix.
+
+## When to Use
+
+Use for ANY technical issue:
+- Test failures
+- Bugs in production or staging
+- Unexpected behavior
+- Performance problems
+- Build/compilation failures
+- External service integration issues
+- Algorithm producing wrong output
+
+**Use this ESPECIALLY when:**
+- Under time pressure (emergencies make guessing tempting)
+- "Just one quick fix" seems obvious
+- You've already tried one fix that didn't work
+- You don't fully understand the issue
+- The issue involves multiple layers (controller → service → repository → DB, or service → EIS/Roster client → external API)
+
+## The Four Phases
+
+Complete each phase before proceeding to the next.
+
+### Phase 1: Root Cause Investigation
+
+**BEFORE attempting ANY fix:**
+
+1. **Read error messages and stack traces completely**
+   - Don't skip past errors or warnings
+   - Note the originating class, line number, and exception type
+   - Spring stack traces are deep — find YOUR code in the trace, not just the framework wrapper
+   - For `ExternalServiceException`, read the downstream error, not just the 502 wrapper
+
+2. **Reproduce consistently**
+   - Can you trigger it reliably?
+   - What are the exact inputs (request body, query params, JWT claims)?
+   - Does it happen every time or intermittently?
+   - If intermittent → check concurrency, caching, or external service flakiness
+
+3. **Check recent changes**
+   - `git diff` and recent commits
+   - New dependencies, config changes in `application.properties`
+   - Flyway migration changes
+   - Changes in external service contracts (EIS, Roster)
+
+4. **Trace data flow across service boundaries**
+
+   This project has multiple integration points. Before proposing fixes, trace where data breaks:
+
+   ```
+   Request → Controller → Service → [Repository / External Client] → Response
+
+   For EACH boundary:
+     - What data enters the component?
+     - What data exits?
+     - Is the transformation correct?
+   ```
+
+   **Common boundaries to check:**
+   - Controller → Service: Are `@Valid` constraints passing bad data?
+   - Service → Repository: Is the query correct? Check the generated SQL via `spring.jpa.show-sql=true`
+   - Service → EIS/Roster Client: Is the request body correct? Is the response being deserialized correctly?
+   - JWT Interceptor → Controller: Are JWT claims extracted correctly?
+   - Redis Cache → Service: Is stale cached data being served?
+   - WebSocket → Service: Is the event payload complete?
+
+5. **Check the obvious first**
+   - `NullPointerException` → trace the null value backward to its source
+   - `DataIntegrityViolationException` → check Flyway migration, column constraints
+   - `HttpMessageNotReadableException` → check request body JSON format
+   - `ExternalServiceException` → check if the external service is up, check the request payload
+   - Hibernate `LazyInitializationException` → missing `JOIN FETCH` or accessing lazy field outside transaction
+
+### Phase 2: Pattern Analysis
+
+1. **Find working examples in the same codebase**
+   - Is there a similar endpoint/service that works? What's different?
+   - For external client issues, compare with another working client method
+
+2. **Compare working vs broken**
+   - List every difference, however small
+   - Don't assume "that can't matter"
+   - Check config differences between environments
+
+3. **Understand dependencies**
+   - What other components does this code depend on?
+   - What assumptions does it make about data state?
+   - Is a lookup entity cached and stale?
+
+### Phase 3: Hypothesis and Testing
+
+1. **Form a single hypothesis**
+   - State clearly: "I think X is the root cause because Y"
+   - Be specific — "the query is wrong" is vague; "the JOIN is missing the shiftCode filter" is specific
+
+2. **Test minimally**
+   - Make the SMALLEST possible change to test the hypothesis
+   - One variable at a time
+   - Don't fix multiple things at once
+
+3. **Verify before continuing**
+   - Did it work? → Phase 4
+   - Didn't work? → Form NEW hypothesis based on what you learned
+   - Don't add more fixes on top of a failed fix
+
+4. **If you don't know, say so**
+   - "I don't understand why X happens" is acceptable
+   - Don't pretend to know — ask the developer for more context
+
+### Phase 4: Implementation
+
+1. **Write a failing test case first**
+   - Reproduce the bug as an automated test
+   - Follow testing standards (`@Nested`, AAA, camelCase naming)
+   - The test must FAIL before the fix and PASS after
+
+2. **Implement the single fix**
+   - Address the root cause, not the symptom
+   - ONE change at a time
+   - No "while I'm here" improvements
+
+3. **Verify the fix**
+   - Run the test — it passes now?
+   - Run the full test suite — no regressions?
+   - `./gradlew build` passes?
+
+4. **If 3+ fix attempts fail — STOP**
+   - 3+ failed fixes indicates an architectural or design problem, not a simple bug
+   - Don't attempt fix #4 without stepping back
+   - Question: Is the approach fundamentally sound? Is there shared state or coupling causing cascading issues?
+   - Discuss with the developer before continuing
+
+## Red Flags — STOP and Return to Phase 1
+
+If you catch yourself thinking:
+- "Quick fix for now, investigate later"
+- "Just try changing X and see if it works"
+- "It's probably this, let me fix it"
+- "I don't fully understand but this might work"
+- "Let me add multiple changes and run tests"
+- Proposing solutions before tracing data flow
+
+**ALL of these mean: STOP. Go back to Phase 1.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "Issue is simple, don't need process" | Simple issues have root causes too. Process is fast for simple bugs. |
+| "Emergency, no time for process" | Systematic debugging is FASTER than guess-and-check thrashing. |
+| "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
+| "One more fix attempt" (after 2+ failures) | 3+ failures = design problem. Question the approach, don't fix again. |
+
+## Quick Reference
+
+| Phase | Key Activities | Done When |
+|-------|---------------|-----------|
+| 1. Root Cause | Read errors, reproduce, check changes, trace data flow | Understand WHAT and WHY |
+| 2. Pattern | Find working examples, compare differences | Identified what's different |
+| 3. Hypothesis | Form theory, test minimally, one change | Confirmed or new hypothesis |
+| 4. Implementation | Failing test, single fix, verify | Bug resolved, tests pass, build green |

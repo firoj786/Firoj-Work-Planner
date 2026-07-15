@@ -1,0 +1,85 @@
+---
+description: Inter-service communication — RestTemplate, BaseServiceClient, pagination, JWT forwarding, and error handling
+globs: "**/clients/**/*.java"
+alwaysApply: false
+---
+
+# Inter-Service Communication
+
+## Chosen Approach: `RestTemplate` via `RestTemplateBuilder`
+Always create `RestTemplate` using `RestTemplateBuilder` — never `new RestTemplate()` (zero timeouts = thread pool exhaustion risk).
+
+```java
+// ✅ Production-ready
+@Bean
+public RestTemplate restTemplate(RestTemplateBuilder builder) {
+    return builder
+        .connectTimeout(Duration.ofMillis(connectTimeout))
+        .readTimeout(Duration.ofMillis(readTimeout))
+        .build();
+}
+```
+
+| Alternative | Why NOT |
+|---|---|
+| **WebClient** (WebFlux) | Project is synchronous Spring MVC. No WebFlux. |
+| **OpenFeign** | Requires Spring Cloud. Overkill without service discovery. |
+| **RestClient** (Spring 6.1+) | Consider migrating on Spring Boot 3.2+ upgrade. |
+
+## Service Client Pattern
+- One **client class per external service** (e.g., `RosterServiceClient`, `EmployeeServiceClient`)
+- All clients extend **`BaseServiceClient`** (shared error handling, JWT forwarding, typed HTTP methods)
+- Base URLs in `application.properties` with protocol (`http://` or `https://`)
+- Timeouts configured globally on `RestTemplate`, not per-client
+
+## BaseServiceClient Provides
+1. **JWT Forwarding** — extracts token from `SecurityContextHolder`, sets `Authorization: Bearer <token>`
+2. **Centralized Error Handling** — catches 4xx, 5xx, `ResourceAccessException` → wraps into `ExternalServiceException`
+3. **Typed HTTP Methods** — `post()`, `get()` with `ParameterizedTypeReference<R>`
+4. **Pagination** — `fetchAllPages()` aggregates all pages into a single list
+
+## Pagination Pattern
+Use `fetchAllPages()` — do NOT write manual pagination loops.
+
+```java
+public List<TableData> getTablesByFilter(Integer teamId, String shift, String shiftTiming) {
+    return fetchAllPages(
+            "/api/internal/tables/filter",
+            page -> TableFilterRequest.builder()
+                    .teamId(teamId).shift(shift).shiftTiming(shiftTiming)
+                    .pageIndex(page).pageSize(DEFAULT_PAGE_SIZE).build(),
+            new ParameterizedTypeReference<>() {},
+            MAX_PAGES
+    );
+}
+```
+
+### Key Pagination Components
+- **`PagedResponse<T>`** — generic DTO with `data`, `pageIndex`, `pageSize`, `totalPages`, `totalRecords`, and derived `isLastPage()`
+- **`IntFunction<T>`** (lambda `page -> ...`) — builds a fresh request body per page, injecting the page number. Keeps request immutable — each page gets a new object.
+- **`ParameterizedTypeReference<PagedResponse<R>>`** — preserves generic type info at runtime (Java erases generics; this is Spring's workaround so Jackson knows how to deserialize `PagedResponse<TableData>` vs `PagedResponse<EmployeeDto>`)
+- **`MAX_PAGES`** — safety limit to prevent infinite loops if the downstream service returns inconsistent pagination (e.g., `isLastPage` never becomes true)
+
+## Error Handling in Clients
+**Always preserve root cause** — pass `ex` as the `cause` parameter:
+
+```java
+// ✅ Root cause preserved
+throw new ExternalServiceException(serviceName, ex.getStatusCode().value(),
+        serviceName + " returned " + ex.getStatusCode(), ex);
+```
+
+For 5xx and connection errors, pass `ex` as last SLF4J argument for full stack trace:
+```java
+log.error("{} returned server error: {} — {}", serviceName, ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
+```
+
+Never expose raw downstream error bodies to API consumers.
+
+## Configuration
+```properties
+services.rest-client.connect-timeout=3000
+services.rest-client.read-timeout=5000
+services.roster.base-url=http://roster-service
+services.eis.base-url=http://employee-service
+```
