@@ -1,0 +1,82 @@
+---
+description: PWA architecture and WebSocket real-time patterns — service worker, caching, push notifications, and roster locking
+globs: src/components/pwa/**/*.{ts,tsx},src/app/mgt/(wfm)/(rosters)/components/websocket-manager/**/*.{ts,tsx},worker/**/*.js,pwa.config.js
+alwaysApply: false
+---
+
+# PWA & Real-Time Features
+
+## Progressive Web App Architecture
+
+### Service Worker Pipeline
+
+1. `next-pwa` generates Workbox service worker at build time
+2. `ServiceWorkerRegistration.tsx` registers `/sw.js` on mount (disabled in dev)
+3. `worker/index.js` handles: push notifications (multi-language), periodic sync (8hr schedule refresh), window message relay
+4. `InstallBanner.tsx` detects `beforeinstallprompt` event → platform-aware install UX
+
+### Caching Strategies (`pwa.config.js`)
+
+| Asset | Strategy | TTL | Rationale |
+|---|---|---|---|
+| Google Fonts | CacheFirst | 1 year | Immutable CDN content |
+| Static fonts/images | StaleWhileRevalidate | 30 days | Rarely change |
+| JS/CSS bundles | StaleWhileRevalidate | 30 days | Versioned by Next.js |
+| API GET requests | NetworkFirst | 2 days | Fresh data preferred, cache fallback |
+| Next.js `_next/data` | StaleWhileRevalidate | 24 hours | Page data JSON |
+| Cross-origin | NetworkFirst | 1 hour | Short-lived external |
+
+**API exclusions**: `/api/auth/*` and `/api/iam/*` are never cached (security-sensitive).
+
+### Push Notifications
+
+- `PushNotification.tsx` manages browser push subscription lifecycle
+- Subscribes via `PushManager.subscribe()` with VAPID public key
+- Uploads subscription to server via notification service
+- Unsubscribes on logout (prevents orphan subscriptions)
+- Worker renders notifications with locale-aware title/body (en, ro)
+
+### Offline Fallback
+
+- Document fallback: `/offline` page
+- Configured in `next.config.mjs`: `fallbacks: { document: '/offline' }`
+- Separate offline pages for root (`/offline`) and MGT (`/mgt/offline`)
+
+## WebSocket — Real-Time Roster Editing
+
+### Architecture
+
+`src/app/mgt/(wfm)/(rosters)/components/websocket-manager/index.tsx` (900+ lines) — manages concurrent roster editing.
+
+### Connection Lifecycle
+
+1. Connect to env-specific WSS URL with JWT as subprotocol
+2. Ping/pong keepalive every N seconds
+3. On disconnect: cleanup timers, release locks
+4. No automatic reconnection implemented — page must be refreshed
+
+### Event Protocol
+
+| Event | Direction | Purpose |
+|---|---|---|
+| `ACQUIRE_LOCK` | Client → Server | Lock row for editing (optimistic) |
+| `RELEASE_LOCK` | Client → Server | Release row lock |
+| `LOCK_ACQUIRED` | Server → Client | Broadcast: row locked by user |
+| `LOCK_RELEASED` | Server → Client | Broadcast: row unlocked |
+| `VALIDATE_CHANGES` | Client → Server | Server-side validation before save |
+| `VALIDATION_RESULT` | Server → Client | Validation pass/fail |
+| `PUBLISH_CHANGES` | Client → Server | Commit changes to roster |
+| `COUNT_UPDATED` | Server → Client | Pending change count notification |
+
+### Concurrency Model
+
+- **Optimistic row locking**: user clicks row → acquires lock → edits → validates → publishes → releases
+- Other users see locked rows as read-only in real-time
+- Lock state tracked in Redux `rosterState` slice
+- WebSocket URL constants per environment in `src/app/mgt/(wfm)/(rosters)/constants.ts`
+
+## Analytics
+
+- `logGAEvent()` from `@/utils/analytics/` — sends to Google Analytics
+- Detects platform via `display-mode: browser` media query: `'web'` vs `'pwa'`
+- Different GA measurement IDs per region and environment

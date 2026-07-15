@@ -1,0 +1,44 @@
+@use '../base/variables' as *;
+@use '../base/mixins' as *;
+
+:root,
+[data-theme='light'] {
+  --bg-primary: #f4f6fb;
+  --bg-secondary: #ffffff;
+  --bg-elevated: rgba(255, 255, 255, 0.85);
+  --text-primary: #0f172a;
+  --text-muted: #64748b;
+  --border: rgba(15, 23, 42, 0.08);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --sidebar-bg: #ffffff;
+  --accent-gradient: linear-gradient(135deg, #{$primary}, #{$secondary});
+}
+
+[data-theme='dark'] {
+  --bg-primary: #0b1020;
+  --bg-secondary: #111827;
+  --bg-elevated: rgba(17, 24, 39, 0.85);
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.12);
+  --glass-bg: rgba(17, 24, 39, 0.72);
+  --glass-border: rgba(148, 163, 184, 0.15);
+  --sidebar-bg: #0f172a;
+  --accent-gradient: linear-gradient(135deg, #{$primary-dark}, #{$secondary});
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg-primary: #0b1020;
+    --bg-secondary: #111827;
+    --bg-elevated: rgba(17, 24, 39, 0.85);
+    --text-primary: #f8fafc;
+    --text-muted: #94a3b8;
+    --border: rgba(148, 163, 184, 0.12);
+    --glass-bg: rgba(17, 24, 39, 0.72);
+    --glass-border: rgba(148, 163, 184, 0.15);
+    --sidebar-bg: #0f172a;
+    --accent-gradient: linear-gradient(135deg, #{$primary-dark}, #{$secondary});
+  }
+}

@@ -1,0 +1,24 @@
+// Design tokens
+$font-family: 'Inter', system-ui, -apple-system, sans-serif;
+
+$primary: #3b82f6;
+$primary-dark: #2563eb;
+$secondary: #8b5cf6;
+$success: #22c55e;
+$warning: #f97316;
+$danger: #ef4444;
+
+$radius-sm: 8px;
+$radius-md: 12px;
+$radius-lg: 16px;
+$radius-xl: 20px;
+
+$shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+$shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+$shadow-glass: 0 8px 32px rgba(31, 38, 135, 0.15);
+
+$sidebar-width: 260px;
+$navbar-height: 64px;
+$mobile-nav-height: 64px;
+
+$transition: 0.2s ease;

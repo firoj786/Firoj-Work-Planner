@@ -1,0 +1,81 @@
+---
+description: Authentication, authorization, and security — JWT lifecycle, role enforcement, encryption, XSS/CSRF prevention
+alwaysApply: true
+---
+
+# Authentication & Security
+
+## Scope
+
+Security rules apply to new and modified code. Do NOT refactor untouched auth code unless explicitly asked. However, if you spot a P0 security issue (exposed token, missing DOMPurify on dangerouslySetInnerHTML) in adjacent code while editing, flag it as a warning.
+
+## Auth Flow (End to End)
+
+1. **Login**: `encryptPassword()` (AES-CBC) + reCAPTCHA v3 token → POST to IAM
+2. **MFA**: If enabled, redirect to `/auth/login/mfa` → `completeMFA()` → tokens
+3. **SSO**: AWS Cognito + Azure AD identity provider → region-specific OAuth URLs
+4. **Token Storage**: `ACCESS_TOKEN`, `REFRESH_TOKEN`, `ID_TOKEN`, `SESSION_INFO` → cookies (never localStorage)
+5. **Auto-Refresh**: `baseQueryWithReauth` intercepts 401/403 → `refreshIDToken()` with promise deduplication → retry
+6. **Logout**: Clear all cookies, redirect to `/auth/login`
+
+## Token Management
+
+| Utility | Location | Purpose |
+|---|---|---|
+| `checkTokenExpiry()` | `@/utils/tokenUtils` | JWT expiry check with 10-min buffer |
+| `encryptPassword()` | `@/utils/index` | AES-CBC encryption before API call |
+| `getIDToken()` | `@/utils/index` | Read ID token from cookie |
+| `isRememberMeEnabled()` | `@/utils/index` | Check refresh eligibility |
+| `refreshIDToken()` | `@/services/api` | Raw fetch to refresh endpoint (deduplicated) |
+
+Token types enum: `TokenTypes` in `@/utils/enums` — `ACCESS_TOKEN`, `REFRESH_TOKEN`, `ID_TOKEN`, `SESSION_INFO`.
+
+## Role-Based Access Control
+
+Roles from JWT claim `custom:role`:
+
+| Role | Portal | Access |
+|---|---|---|
+| GP | `/gp/*` | Schedule, leaves, swaps, profile |
+| WFM1, WFM2 | `/mgt/*` | Rosters, configuration, studio tracker |
+| OPS | `/mgt/*` | Operations management |
+
+Enforcement layers:
+1. **Middleware** (`src/middleware.ts`) — redirects wrong-portal access
+2. **Environment gates** — studio-tracker, organizations are dev-only
+3. **UI-level** — conditional rendering based on decoded role
+
+## Security Rules (Non-Negotiable)
+
+### Token Storage
+- **Cookies only** — never `localStorage` or `sessionStorage` for tokens
+- Use `storageManager.setCookie()` for setting, direct cookie read via `js-cookie` or `request.cookies` in middleware
+
+### XSS Prevention
+- **Every `dangerouslySetInnerHTML` MUST wrap content with `DOMPurify.sanitize()`**
+- Currently 2 instances exist — both correctly sanitized
+- Prefer Mantine components over raw HTML rendering
+
+### Password Security
+- **Always encrypt via `encryptPassword()`** before sending to any API
+- Uses CryptoJS AES-CBC with random IV + base64 encoding
+- Secret key from `NEXT_PUBLIC_ENCRYPT_PASSWORD_SECRET_KEY` env var
+
+### Bot Protection
+- Google reCAPTCHA v3 on login form
+- Region-specific site keys (LOCAL, UAT, PROD per region)
+- Wrapper: `src/app/auth/login/components/recaptchaWrapper/`
+
+### Input Handling
+- No `eval()`, `new Function()`, or dynamic code execution
+- No unescaped user input in HTML
+- Form validation via Mantine `useForm` + `useFormValidation` hook
+
+### Route Protection
+- Every protected route must be covered by middleware matcher: `['/', '/auth/:path*', '/gp/:path*', '/mgt/:path*']`
+- New route groups must be added to the matcher
+- Public auth paths explicitly allowlisted in middleware
+
+### Navigation Guards
+- `@/utils/navigationGuard.ts` — `confirmNavigation()` checks `window.hasUnsavedChanges`
+- Apply to pages with edit forms that can lose data

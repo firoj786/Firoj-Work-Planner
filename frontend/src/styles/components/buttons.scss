@@ -1,0 +1,57 @@
+@use '../base/variables' as *;
+@use '../base/mixins' as *;
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: $radius-md;
+  border: 1px solid transparent;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform $transition, opacity $transition, background $transition;
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  &:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+}
+
+.btn--primary {
+  background: var(--accent-gradient);
+  color: #fff;
+}
+
+.btn--secondary {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.btn--danger {
+  background: rgba($danger, 0.12);
+  color: $danger;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn--sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.btn--icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: $radius-sm;
+}

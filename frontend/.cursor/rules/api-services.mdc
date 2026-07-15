@@ -1,0 +1,94 @@
+---
+description: API service layer — endpoint organization, environment routing, response transformation, error handling, and upload patterns
+globs: src/services/**/*.ts
+alwaysApply: false
+---
+
+# API Service Layer
+
+## Organization (`src/services/`)
+
+| File | Domain |
+|---|---|
+| `api.ts` | Base RTK Query setup, auth interceptor, retry logic |
+| `constants.ts` | All API URL constants, environment-specific base URLs |
+| `types.ts` | Shared request/response types |
+| `authService.ts` | Login, MFA, SSO, password reset, change password |
+| `rosterService.ts` | Roster CRUD, upload, publish, download |
+| `employeeDBService/` | Employee database v2 (module pattern) |
+| `employeeDBServicev3/` | Employee database v3 (module pattern) |
+| `employeeDetailsService/` | Employee profile details (module pattern) |
+| `leavesService/` | Leave management (module pattern) |
+| `attendanceService/` | Attendance tracking (module pattern) |
+| `absenceService/` | Absence records (module pattern) |
+| `swapService.ts` | Shift swap operations |
+| `configurationService.ts` | Work rules, team capacity, leave quota |
+| `manageOrgService.ts` | Organization hierarchy |
+| `studioService.ts` | Studio management |
+| `studioTrackerService.ts` | Real-time studio tracking |
+| `notificationsService.ts` | Push notification subscription |
+| `gpSchedules.ts` | GP schedule views |
+
+## Module Pattern (Required for Complex Services)
+
+```
+featureService/
+  featureService.ts   → RTK Query endpoint definitions
+  types.ts            → Request/response interfaces
+  index.ts            → Re-exports (barrel file)
+```
+
+Use this pattern when a service has 5+ endpoints or complex types. Simple services (< 5 endpoints) can be single files.
+
+## Environment URL Resolution
+
+Base URLs resolve from `env` cookie via `getBaseUrl()` in constants:
+
+```
+LOCAL/DEV     → https://ppworkforce361-api.arriselabs.com
+QA            → https://ppworkforce360-api-qa.arriselabs.com
+UAT           → https://ppworkforce360-api-uat.arriselabs.com
+PRODUCTION    → https://ppworkforce360-api.arriselabs.com
+```
+
+Each region (RO, BG, RS) has its own URL set. URL constants: `IAM_URL`, `ROSTER_URL`, `EMPLOYEE_DB_URL`, `LEAVES_URL`, `NOTIFICATION_URL`, etc.
+
+## Response Transformation
+
+Raw API responses are transformed in `@/utils/responseModifiers.ts` — not inline in components:
+
+- `modifyFilterResponse()` — filter dropdown data
+- `modifyLeaveFilterResponse()` / `modifySwapFilterResponse()` — with localization
+- `transformEmployeeDataResponse()` — employee profile sections
+- `getEmpDetails()` — region-aware field filtering
+
+## File Uploads
+
+```typescript
+uploadFile: build.mutation({
+  query: (formData: FormData) => ({
+    url: joinPath(BASE_URL, 'upload'),
+    method: HTTPMethods.POST,
+    body: formData,  // NO JSON.stringify — RTK Query sends FormData natively
+  }),
+}),
+```
+
+## File Downloads
+
+Use `downloadFileHandler()` from `@/utils/download` — handles blob creation, filename extraction from `X-Filename` header, and DOM cleanup.
+
+## Error Handling Chain
+
+1. RTK Query `baseQueryWithReauth` catches 401/403 → token refresh → retry
+2. 503 errors trigger exponential backoff (max 3 retries)
+3. Component-level: check `isError` / `error` from RTK Query hooks
+4. User notification: `showToast({ type: 'error', ... })`
+5. **Never silently swallow errors** — every API call must surface failures
+
+## Anti-Patterns
+
+- **No raw `fetch` in components or hooks** — only `api.ts` uses raw fetch for token refresh
+- **No manual `useEffect` + `useState` for API calls** — use RTK Query hooks
+- **No `console.log` of API responses in services** — remove before committing
+- **No request cancellation (AbortController) exists yet** — be aware long-running requests are not cancelled on unmount

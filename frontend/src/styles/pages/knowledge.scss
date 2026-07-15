@@ -1,0 +1,74 @@
+@use '../base/variables' as *;
+@use '../base/mixins' as *;
+
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+
+  @include mobile {
+    grid-template-columns: 1fr;
+  }
+}
+
+.knowledge-list {
+  @include glass-card;
+  padding: 0.75rem;
+}
+
+.knowledge-item {
+  padding: 0.75rem;
+  border-radius: $radius-md;
+  cursor: pointer;
+  transition: background $transition;
+
+  &:hover,
+  &.active {
+    background: rgba($primary, 0.1);
+  }
+
+  &__title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+
+  &__meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+}
+
+.knowledge-detail {
+  @include glass-card;
+  padding: 0;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+
+  &__header {
+    padding: 1.5rem 1.5rem 0;
+  }
+
+  &__content {
+    padding: 1.25rem 1.5rem 1.5rem;
+  }
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}

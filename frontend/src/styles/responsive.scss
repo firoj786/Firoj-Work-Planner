@@ -1,0 +1,19 @@
+@use './base/mixins' as *;
+
+@include mobile {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+@include tablet {
+  .hide-tablet {
+    display: none !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .show-mobile-only {
+    display: none !important;
+  }
+}

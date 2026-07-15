@@ -1,0 +1,161 @@
+---
+description: Testing conventions — test-first workflow, Jest + RTL setup, Mantine provider wrapping, and coverage expectations
+globs: **/*.{test,spec}.{ts,tsx}
+alwaysApply: false
+---
+
+# Testing
+
+## Coverage Status: Minimal (7 test files)
+
+Testing infrastructure is production-ready but coverage is sparse. Priority for new tests:
+1. Shared components in `src/components/`
+2. Custom hooks in `src/hooks/`
+3. Utility functions in `src/utils/`
+4. Critical business logic (roster, leaves, swaps)
+
+## Test Workflow
+
+1. **Design test cases first** — list all scenarios (happy path, edge cases, error cases) before writing code
+2. **Developer reviews the test plan** — confirms coverage before implementation
+3. **Implement tests** — write tests following the patterns below
+4. This prevents regression — if a test plan is reviewed upfront, all corner cases are captured once
+
+### Test Plan Template
+
+Before writing any test file, outline a plan like this:
+
+```
+## Test Plan: ComponentName
+
+### Happy Path
+- Renders with default props
+- Displays data when API returns successfully
+- Submits form with valid input
+
+### Edge Cases
+- Renders empty state when data is []
+- Handles very long strings / special characters
+- Behaves correctly on mobile viewport
+
+### Error Cases
+- Shows error toast when API fails
+- Displays validation errors on invalid input
+- Handles network timeout gracefully
+
+### Interaction
+- Button disabled during loading
+- Modal opens/closes correctly
+- Keyboard navigation works
+```
+
+Get this plan reviewed **before** writing code. Once approved, implement each scenario as a test case.
+
+## Stack
+
+- **Runner**: Jest 29 via `next/jest`
+- **Environment**: jsdom (`jest-environment-jsdom`)
+- **Assertions**: `@testing-library/jest-dom`
+- **Rendering**: `@testing-library/react`
+- **Interaction**: `@testing-library/user-event`
+- **Coverage**: v8 provider, output as `lcov` for SonarQube
+
+## Pre-Mocked Globals (`jest.setup.ts`)
+
+Already mocked — do not re-mock in individual tests:
+
+```typescript
+next/navigation   → useRouter() returns { prefetch: () => null }
+next-intl         → useTranslations() returns (key) => key
+window.matchMedia → mock returning { matches: false }
+window.ResizeObserver → no-op mock
+HTMLElement.scrollIntoView → no-op
+```
+
+## Mantine Provider Wrapping
+
+Components using Mantine must be wrapped. Create a test utility:
+
+```typescript
+import { MantineProvider } from '@mantine/core';
+import { render } from '@testing-library/react';
+
+function renderWithProviders(ui: React.ReactElement) {
+  return render(<MantineProvider>{ui}</MantineProvider>);
+}
+```
+
+For components using Redux, also wrap with `<Provider store={mockStore}>`.
+
+## Writing Tests
+
+```typescript
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+describe('ComponentName', () => {
+  it('renders without crashing', () => {
+    render(<Component />);
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+  });
+
+  it('handles user interaction', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    render(<Component onSave={onSave} />);
+    await user.click(screen.getByRole('button', { name: /save/i }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+## Test Clarity Over DRY
+
+Readability in tests is more important than avoiding repetition. Follow these rules:
+
+- **If 3+ tests in a `describe` share the same props and setup** → move rendering to a shared `beforeEach` or `setup()` helper
+- **If tests require different props/state per case** → keep `render(...)` inside each test so the scenario differences are immediately obvious
+- **Never hide test-specific inputs in shared setup** — a reader should understand what each test does without scrolling to a `beforeEach`
+- **For "default render" checks** (renders, shows title, has button) → combine into one consolidated smoke test with related assertions instead of 5 tiny tests
+
+```typescript
+// GOOD: Different scenarios stay in each test — differences are obvious
+it('shows error when email is empty', () => {
+  render(<LoginForm email="" password="123" />);
+  expect(screen.getByText(/required/i)).toBeInTheDocument();
+});
+
+it('submits when form is valid', () => {
+  render(<LoginForm email="a@b.com" password="secure123" />);
+  // ...
+});
+
+// BAD: Scenario-specific props hidden in beforeEach
+beforeEach(() => {
+  render(<LoginForm email="" password="" />);
+});
+it('shows error', () => { /* which error? why? */ });
+```
+
+## Testing Rules
+
+- **Query priority**: `getByRole` > `getByLabelText` > `getByText` > `getByTestId` (last resort)
+- **Test file location**: co-located as `Component.test.tsx` in the same directory
+- **One describe per component**, multiple `it` blocks for behaviors
+- **Mock API calls**: mock RTK Query hooks, not the fetch layer
+- **No snapshot tests** — they provide low signal and high maintenance
+- **Async operations**: always use `await` with `userEvent`, use `waitFor` for async state changes
+
+## Running Tests
+
+```bash
+npm test                # All tests
+npm run test:watch      # Watch mode during development
+npm run test:coverage   # Full coverage report (CI uses this)
+```
+
+## CI Integration
+
+- GitLab CI `test` stage runs `npm run test:coverage`
+- Coverage artifacts in `coverage/lcov.info` consumed by SonarQube
+- `passWithNoTests: true` — pipeline doesn't fail when no tests match (temporary)

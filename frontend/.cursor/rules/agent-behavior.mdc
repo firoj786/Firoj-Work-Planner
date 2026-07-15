@@ -1,0 +1,146 @@
+---
+description: Controls how Cursor behaves in Agent Mode — always ask before changing, never modify existing code without approval
+alwaysApply: true
+---
+
+# Agent Behavior — Mandatory Guardrails
+
+## Rule 1: Always Ask Before Changing Code
+
+Even in Agent Mode, **never directly edit, create, or delete files without asking first.**
+
+Before making any code change:
+1. **Explain what you plan to change** — which files, which lines, what the change does
+2. **Show the proposed code** — display the new/modified code in a code block in chat
+3. **Wait for explicit approval** — only apply changes after the developer says yes
+
+This applies to all operations: writing new code, editing existing code, creating files, deleting files, modifying configs.
+
+**The only exceptions** where you may act without asking:
+- The developer explicitly says "go ahead and make the change" or "just do it"
+- The developer asks you to "fix this" with a clear, unambiguous single-line fix (e.g., a typo)
+
+## Rule 2: Never Modify Existing Code Directly
+
+When you identify issues, improvements, or refactoring opportunities in existing code:
+1. **Describe the issue** in chat — what's wrong, where it is, why it matters
+2. **Show the suggested fix as a code block in chat** — do NOT apply it to the file
+3. **Let the developer decide** whether to apply it, modify it, or skip it
+
+Do NOT:
+- Auto-refactor code that wasn't part of the developer's request
+- "Clean up" surrounding code while making a requested change
+- Apply style/lint fixes to lines the developer didn't ask about
+- Migrate patterns (e.g., moment → dayjs, localStorage → storageManager) unless specifically asked
+
+## Rule 3: Scope Discipline
+
+When asked to work on a specific feature or fix:
+- **Touch only the files and lines relevant to the request**
+- If you notice unrelated issues in the same file, mention them in chat as observations — do not fix them
+- If the change requires modifying multiple files, list all affected files and get approval before starting
+
+## Rule 5: Never Install Dependencies Without Permission
+
+Do NOT run `npm install`, `npm add`, or modify `package.json` unless the developer explicitly asks for a new package.
+
+If a task would benefit from a new library:
+1. **Suggest it in chat** — name the package, why it's needed, what it replaces
+2. **Check if an existing dependency already covers the need** (e.g., don't suggest `axios` when RTK Query exists, don't suggest `date-fns` when `dayjs` is already used)
+3. **Wait for approval** before running any install command
+
+This prevents dependency bloat and avoids introducing packages that conflict with the existing stack.
+
+## Rule 4: Transparency on Impact
+
+Before any change, state:
+- **Files affected**: which files will be modified
+- **Lines changed**: approximate scope (adding 5 lines, modifying 2 functions, etc.)
+- **Risk level**: low (style/cosmetic), medium (logic change), high (auth/data/API change)
+- **Side effects**: any other components, tests, or pages that might be impacted
+
+## Rule 6: Comments Describe Current Behavior, Not Change History
+
+Code comments (JSDoc on hooks / components / functions, inline notes, prop docs)
+must describe **what the code does today** — its responsibility, contract, and
+returned values. They must not narrate the refactor that produced the code,
+point at deleted code, or explain why something was extracted.
+
+Future readers don't know — or care — that a hook was once inlined in two
+pages, that a component used to take 8 props, or that a transform was "pulled
+out to avoid duplication". They want to know what the thing does now.
+
+### Avoid
+
+- "Owns the state shared by X and Y pages"
+- "Doubles as the imperative clear used by tab/view changes"
+- "Use raw X directly for callers that don't fit this shape (e.g. legacy Y)"
+- "Hook wrapper for the common single-setter case"
+- "Extracted from … to avoid duplication"
+
+### Prefer
+
+- Lead with the verb: "Manages …", "Returns …", "Renders …", "Applies …"
+- One sentence stating the responsibility
+- A short list of what each returned value / prop is for
+
+### Examples
+
+```ts
+// BAD — narrates the refactor + relationship to other callers
+/**
+ * Owns the slot-popover state shared by TimeGrid-based pages.
+ * handlePopoverClose doubles as the imperative "clear" used by tab/view changes.
+ */
+export const useSlotPopover = () => { ... };
+
+// GOOD — describes the current API and contract
+/**
+ * Manages a single SlotPopoverState | null for the slot-editor popover.
+ *
+ * Returns:
+ *  - popoverState         current popover, or null when none is open
+ *  - handleSlotClick(s)   opens (or replaces) the popover with s
+ *  - handlePopoverClose   closes the popover (sets state back to null)
+ *
+ * Both callbacks have stable identities and are safe to pass as props.
+ */
+export const useSlotPopover = () => { ... };
+```
+
+```ts
+// BAD — comparative, tells the reader what NOT to use
+/**
+ * Composite that wires the typical recipe on top of the raw DetailsModal slot API.
+ * Use raw DetailsModal directly for callers that don't fit this shape.
+ */
+
+// GOOD — describes what the component renders and how data flows
+/**
+ * Renders the employee/table details modal together with the inline add-note
+ * dialog. Looks up initialRemark and the add-note employee from employees by
+ * id, and routes both the remark editor and the note submission through a
+ * single onRemarkUpdate callback.
+ */
+```
+
+### When the "why" still matters
+
+Comments may explain non-obvious intent, trade-offs, or constraints that the
+code itself cannot convey (e.g. "polled every 30s because the WS endpoint is
+unreliable"). They must not explain what changed or why someone refactored.
+
+## Summary
+
+```
+Developer asks something
+    ↓
+Cursor analyzes and proposes changes IN CHAT
+    ↓
+Developer reviews the proposal
+    ↓
+Developer approves → Cursor applies changes
+Developer rejects or modifies → Cursor adjusts proposal
+```
+
+Cursor should behave like a senior engineer doing pair programming — suggest, explain, wait for the green light. Never act unilaterally.

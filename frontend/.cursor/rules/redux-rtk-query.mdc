@@ -1,0 +1,79 @@
+---
+description: Redux Toolkit and RTK Query — store architecture, slice patterns, API caching, token refresh, and anti-patterns
+globs: src/app/store/**/*.ts,src/services/**/*.ts
+alwaysApply: false
+---
+
+# Redux Toolkit & RTK Query
+
+## Store Architecture (`src/app/store/store.ts`)
+
+- Singleton store created via `useRef` in `StoreProvider` — prevents re-creation on re-renders
+- Two RTK Query API instances (never mix them):
+  - `api` — authenticated requests, attaches JWT via `prepareHeaders`
+  - `noTokenApi` — public endpoints (login, forgot-password, password reset)
+- Both API middlewares registered: `getDefaultMiddleware().concat(api.middleware).concat(noTokenApi.middleware)`
+
+## Slice Structure
+
+```
+src/app/store/slices/
+  featureState/
+    slice.ts        → createSlice with reducers and initialState
+    selectors.ts    → exported selector hooks (NOT raw useSelector inline)
+    types.ts        → TypeScript interfaces for this slice's state
+    README.md       → optional documentation (rosterState has one)
+```
+
+11 active slices: `authState`, `rosterState`, `dailyRosterState`, `employeeState`, `leaveState`, `swapState`, `scheduleState`, `notificationState`, `configState`, `attendanceState`, `manageOrgState`
+
+## RTK Query Endpoint Pattern
+
+```typescript
+export const featureService = api.injectEndpoints({
+  endpoints: (build) => ({
+    getFeatureData: build.query<ResponseType, ArgsType>({
+      query: (args) => ({
+        url: joinPath(FEATURE_URL, 'endpoint'),
+        method: HTTPMethods.GET,
+        params: args,
+      }),
+      providesTags: ['FeatureTag'],
+    }),
+    mutateFeature: build.mutation<ResponseType, ArgsType>({
+      query: (args) => ({
+        url: joinPath(FEATURE_URL, 'endpoint'),
+        method: HTTPMethods.POST,
+        body: JSON.stringify(args),
+      }),
+      invalidatesTags: ['FeatureTag'],
+    }),
+  }),
+});
+
+export const { useGetFeatureDataQuery, useMutateFeatureMutation } = featureService;
+```
+
+## Token Refresh — How It Actually Works
+
+1. `baseQueryWithReauth` wraps `fetchBaseQuery` with interceptor
+2. On 401/403: decodes JWT, checks if expired
+3. If expired + rememberMe enabled: calls `refreshIDToken()` via raw `fetch` (intentionally bypasses RTK Query)
+4. `refreshIDToken()` uses **promise deduplication** — multiple concurrent 401s share one refresh call
+5. On successful refresh: retries original request with **exponential backoff** (max 3 attempts, targets 503)
+6. On refresh failure: clears cookies, redirects to login
+
+## Registered Tag Types
+
+`api` has these tag types: `getEmployeeInfo`, `getAcknowledgementStatus`. New features requiring cache invalidation MUST register their tag in `store.ts`.
+
+## Rules
+
+- **Queries for GET, Mutations for POST/PUT/DELETE** — never use `build.query` for write operations
+- **Always define `providesTags` on queries and `invalidatesTags` on mutations** — stale cache is a production bug
+- **Use `HTTPMethods` enum** — not string literals `'POST'`
+- **Use `joinPath()` with URL constants** from `@/services/constants`
+- **FormData bodies must NOT be `JSON.stringify()`d**
+- **No raw `fetch` in components** — the only raw fetch is in `api.ts` for token refresh
+- **Selectors go in `selectors.ts`** — never inline `useSelector(state => state.feature.field)` in components
+- **Do not dispatch Redux actions for server data** — that's what RTK Query cache is for

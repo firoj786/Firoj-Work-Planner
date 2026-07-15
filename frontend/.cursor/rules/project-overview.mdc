@@ -1,0 +1,71 @@
+---
+description: Zephyr-FE project context — architecture, tech stack, conventions, and known technical debt
+alwaysApply: true
+---
+
+# Zephyr-FE — Project Overview
+
+## Scope of These Rules
+
+**These rules apply to NEW and MODIFIED code only.** Do NOT refactor, rewrite, or "fix" existing code to match these standards unless the developer explicitly asks for it. Legacy patterns (moment usage, inline styles, direct localStorage, console.logs, missing error boundaries) are documented as known technical debt — they will be addressed incrementally, not all at once. When editing an existing file, only apply rules to the lines you are changing or adding.
+
+**Agent Mode behavior**: Always propose changes in chat first and wait for approval before editing any file. See `agent-behavior.mdc` for full guardrails.
+
+## What This Is
+
+Production-grade workforce management (WFM) frontend for Arrise/PPLC. Manages rosters, attendance, leaves, swaps, employees, organizations, and studio tracking across Romania, Bulgaria, and Serbia.
+
+## Tech Stack (Exact Versions)
+
+| Layer | Technology | Version |
+|---|---|---|
+| Framework | Next.js (App Router) | 14.2.13 |
+| Runtime | React | 18.x |
+| Language | TypeScript (strict) | 5.x |
+| UI Library | Mantine | 7.12.1 |
+| State | Redux Toolkit + RTK Query | 2.2.7 |
+| Data Tables | TanStack React Table | 8.21.2 |
+| Charts | Recharts | 2.12.7 |
+| Styling | SCSS Modules + PostCSS | — |
+| i18n | next-intl | 3.14.1 |
+| PWA | next-pwa + Workbox | 5.6.0 |
+| Auth | JWT + MFA + AWS Cognito SSO | Custom |
+| Date (preferred) | dayjs | 1.11.11 |
+| Email | React Email | 2.1.4 |
+
+**NOT used**: Tailwind, styled-components, Chakra, NextAuth, Clerk, Prisma, tRPC.
+
+## Two User Portals
+
+- **MGT** (`/mgt/*`) — Management portal: WFM admins, HR, OPS roles (WFM1, WFM2, OPS)
+- **GP** (`/gp/*`) — General Practitioner portal: individual employee self-service
+
+## Key Architectural Decisions
+
+- Route groups `(wfm)`, `(hr)`, `(training)`, `(studio-tracker)` segment features without URL impact
+- RTK Query is the sole data-fetching layer — no raw `fetch` in components
+- Two API instances: `api` (authenticated) and `noTokenApi` (public)
+- Provider composition in root layout: NextIntl > Redux > Mantine > Modals
+- Centralized route constants: `src/routes.ts` — never hardcode paths
+- Types co-located with features — no monolithic global types directory
+- Path alias `@/*` resolves to `src/*`
+- `storageManager.ts` provides SSR-safe cookie/localStorage/sessionStorage access
+
+## Multi-Region Architecture
+
+Three regions with independent environments (local, dev, QA, UAT, prod each):
+- **RO** (Romania) — primary
+- **BG** (Bulgaria)
+- **RS** (Serbia)
+
+Environment detected via hostname or `env` cookie. Affects: API base URLs, SSO endpoints, reCAPTCHA keys, GA measurement IDs, WebSocket URLs.
+
+## Known Technical Debt
+
+- **Mixed date libraries**: `moment` (40+ files) and `dayjs` (20+ files) coexist — use dayjs for all new code
+- **No React error boundaries**: no `error.tsx` files exist — add for critical routes
+- **Unused dependencies**: `@tiptap/*`, `lottie-react`, `embla-carousel-react` installed but not imported
+- **Console.log pollution**: 20+ instances in production code — `removeConsole` in next.config.mjs is commented out
+- **Direct storage access**: Some files bypass `storageManager` for localStorage/sessionStorage
+- **Inline styles**: 100+ instances of `style={{}}` that should migrate to SCSS Modules
+- **Testing coverage**: Only 7 test files — coverage is minimal

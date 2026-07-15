@@ -1,0 +1,57 @@
+@use '../base/variables' as *;
+@use '../base/mixins' as *;
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg-primary);
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-height: 100vh;
+}
+
+.app-content-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.app-content {
+  padding: 1.5rem;
+
+  @include mobile {
+    padding: 1rem;
+    padding-bottom: calc(#{$mobile-nav-height} + 1rem);
+  }
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.page-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.page-grid--stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.page-grid--two {
+  grid-template-columns: 1.2fr 0.8fr;
+
+  @include mobile {
+    grid-template-columns: 1fr;
+  }
+}

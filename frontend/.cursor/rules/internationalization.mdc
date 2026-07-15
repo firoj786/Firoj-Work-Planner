@@ -1,0 +1,73 @@
+---
+description: Internationalization — next-intl patterns, locale management, translation workflow, and known gaps
+globs: src/**/*.{ts,tsx},locales/**/*.json
+alwaysApply: false
+---
+
+# Internationalization (i18n)
+
+## Setup
+
+- Library: `next-intl` v3 with `createNextIntlPlugin()` in `next.config.mjs`
+- Config: `src/i18n.ts`
+- Supported locales: `en` (English, default), `ro` (Romanian), `bg` (Bulgarian), `rs` (Serbian)
+- Locale files: `/locales/{en,ro,bg,rs}.json`
+- Locale preference stored in cookie: `NEXT_LOCALE`
+
+## Server-Side Flow
+
+1. Root `layout.tsx` calls `getLocale()` + `getMessages()` (server-side)
+2. Messages deep-merged with English fallback via `deepmerge` — missing keys fall back to `en`
+3. Passed to `<NextIntlClientProvider messages={messages}>`
+
+## Component Usage
+
+```typescript
+import { useTranslations } from 'next-intl';
+
+function MyComponent() {
+  const t = useTranslations('FeatureName');
+  return <Button>{t('saveButton')}</Button>;
+}
+```
+
+**Rules:**
+- Every user-facing string MUST use `useTranslations()` — zero hardcoded English in JSX
+- Namespace by feature: `useTranslations('Roster')`, `useTranslations('Leaves')`, `useTranslations('Common')`
+- Validation messages, toast messages, button labels, placeholders — ALL translated
+- Dates/times formatted via project formatters that respect locale
+
+## Known Hardcoded Strings (Technical Debt)
+
+These exist in the codebase and should not be replicated:
+- `" | ID: "` in `mgt-layout/index.tsx`
+- `'Delete Successfully!'` in `notification.tsx`
+- `'Go Back'` in `confirmModalCommon.tsx`
+- Various labels in `shiftAllocation/index.tsx`
+
+**Do not add more hardcoded strings. All new code must be fully translated.**
+
+## Locale Preference Management
+
+```typescript
+import { setLanguagePreference, getLanguagePreference } from '@/utils/language';
+```
+
+- `@formatjs/intl-localematcher` + `negotiator` handle locale negotiation
+- Preference persisted in `NEXT_LOCALE` cookie
+- Language picker component: `src/components/languagePicker/`
+
+## Email Templates
+
+- Templates: `src/emails/templates/{en,ro,bg}/`
+- Translations: `src/emails/locales/{en,ro,bg}.json`
+- Deep merge with `deepmerge` for fallback behavior
+- Built with `@react-email/components`
+
+## Adding a Translation
+
+1. Add key to `/locales/en.json` under the correct namespace
+2. Add corresponding key to `/locales/ro.json`, `/locales/bg.json`, and `/locales/rs.json`
+3. Use in component: `const t = useTranslations('Namespace'); t('newKey')`
+4. If email-related, also update `src/emails/locales/`
+5. Verify all four languages render correctly

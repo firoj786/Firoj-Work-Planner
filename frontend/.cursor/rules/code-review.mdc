@@ -1,0 +1,193 @@
+---
+description: Senior-level code review checklist — evaluate every code change against project conventions, security, performance, and correctness
+alwaysApply: true
+---
+
+# Code Review Checklist
+
+## Scope: New and Changed Code Only
+
+**Review ONLY the lines that are new or modified in the current change.** Do not flag pre-existing issues in untouched code. If old code surrounding the change has violations, note them as "Pre-existing (out of scope)" — do not demand they be fixed in the same PR. The only exception is P0 security issues (token exposure, missing sanitization) which should always be flagged regardless of scope.
+
+When reviewing, evaluate every applicable section below. Report violations with exact file path, line number, severity, and a concrete fix. Mark each section PASS, FAIL, or N/A.
+
+**Severity levels**: P0 (security/data loss) > P1 (correctness/crash) > P2 (performance) > P3 (maintainability) > P4 (style)
+
+---
+
+## 1. TypeScript & Type Safety [P1]
+
+- [ ] No new `any` without a `// TODO: type this` comment — prefer `unknown` + type guard
+- [ ] No `as any` or `as unknown as X` without a justification comment
+- [ ] No unused variables, imports, or parameters — build fails (`noUnusedLocals`, `noUnusedParameters`)
+- [ ] Exported functions have explicit return types
+- [ ] Types co-located with feature (`types.ts` in slice/service directory), not dumped globally
+- [ ] Reuses existing enums (`HTTPMethods`, `TokenTypes`, `ENV`) — no duplicate magic strings
+- [ ] No `moment` imports — use `dayjs` and `@/utils/datetime` for all new date code
+- [ ] No imports from unused dependencies (`@tiptap/*`, `lottie-react`, `embla-carousel-react`)
+- [ ] No TS7006 in changed lines — callback parameters (`.map()`, `.filter()`, `.reduce()`, event handlers) must be explicitly typed when inference is unclear
+
+## 2. Import Hygiene [P4]
+
+- [ ] Import order: builtin > external > @/ internal > parent > sibling > styles (ESLint error)
+- [ ] Blank line between each import group
+- [ ] `@/*` path alias for anything in `src/` — no `../../../` deep relative paths
+- [ ] No unused imports
+- [ ] SCSS/CSS imports are last
+- [ ] No barrel imports pulling entire libraries — use named imports
+
+## 3. SSR Safety [P1]
+
+- [ ] No bare `window`, `document`, `navigator`, `localStorage`, `sessionStorage` access without `typeof window !== 'undefined'` guard
+- [ ] Uses `@/utils/storageManager` for cookie/localStorage/sessionStorage — not direct `window.localStorage`
+- [ ] `useEffect` used for browser-only side effects — never in module scope or render body
+- [ ] Components using browser APIs have `'use client'` directive
+- [ ] No `window.location` mutations outside event handlers or effects
+
+## 4. React & Component Quality [P2]
+
+- [ ] `'use client'` only on components that need hooks, events, or browser APIs
+- [ ] No business logic inside JSX return — extract to `useMemo`, variables, or hooks above return
+- [ ] `useCallback` wraps handlers passed as props to children or in `useEffect` deps
+- [ ] `useMemo` wraps expensive computations: column definitions, sorted/filtered large lists, heavy transformations
+- [ ] `useMemo` NOT overused on trivial expressions (`x ?? {}`, boolean checks, string concat, simple casts)
+- [ ] `React.memo` on row/cell components rendered in `.map()` for lists > 20 items
+- [ ] `key` prop uses stable unique ID — never array index on dynamic/reorderable lists
+- [ ] No inline object/array literals as props to `React.memo` children (breaks memoization)
+- [ ] `useEffect` has correct dependency array — no missing deps, no unnecessary deps
+- [ ] `useEffect` with timers/subscriptions/listeners returns a cleanup function
+- [ ] No empty `useEffect(() => {}, [deps])` — this is dead code
+- [ ] Component files under 300 lines — split into sub-components if larger
+- [ ] Heavy components (modals, charts) use `next/dynamic` with `{ ssr: false }` where needed
+
+## 5. State Management [P2]
+
+- [ ] Local UI state (`useState`) vs shared state (Redux) correctly separated
+- [ ] RTK Query for all server data — no `fetch` + `useEffect` + `useState` pattern
+- [ ] RTK Query mutations define `invalidatesTags` — no stale cache after writes
+- [ ] Selectors from `selectors.ts` — no inline `useSelector(state => state.x.y)` in components
+- [ ] No direct store imports in components — use `useSelector`, `useDispatch`, RTK Query hooks
+- [ ] No Redux dispatch for data that should be RTK Query cache
+
+## 6. API Layer [P1]
+
+- [ ] New endpoints use `api.injectEndpoints()` or `noTokenApi.injectEndpoints()`
+- [ ] Uses `HTTPMethods` enum — not `'POST'` string
+- [ ] URL built with `joinPath()` + constants from `@/services/constants`
+- [ ] `FormData` body is NOT wrapped in `JSON.stringify()`
+- [ ] Error states handled — `isError` checked, user notified via `showToast`
+- [ ] No raw `fetch()` calls (only exception: `api.ts` token refresh)
+- [ ] No sensitive data (tokens, passwords, PII) in `console.log`
+- [ ] Response transformation in `@/utils/responseModifiers` — not inline in components
+
+## 7. Internationalization [P3]
+
+- [ ] All user-facing strings use `useTranslations()` — zero hardcoded English in JSX
+- [ ] Translation key added to all three locale files: `en.json`, `ro.json`, `bg.json`
+- [ ] Namespace matches feature: `useTranslations('Roster')`, `useTranslations('Common')`
+- [ ] Date/time display uses project formatters from `@/utils/datetime` or `@/utils/formatters`
+- [ ] Validation messages, toast messages, button labels, placeholders — all translated
+- [ ] No new hardcoded strings added (existing ones are tracked technical debt)
+
+## 8. Styling [P4]
+
+- [ ] No Tailwind classes — project uses Mantine + SCSS Modules
+- [ ] Component styles in co-located `*.module.scss` — not global CSS
+- [ ] Colors use `Colors.xxx` from `@/app/style/colors` or Mantine theme — no raw hex values
+- [ ] Inline `style={{}}` only for truly dynamic runtime values (drag positions, transforms)
+- [ ] Responsive uses Mantine breakpoint PostCSS variables — no hardcoded `px` media queries
+- [ ] New colors added to `Colors` class, not scattered as local constants
+
+## 9. Security [P0]
+
+- [ ] No tokens, keys, or secrets hardcoded — environment variables only
+- [ ] Every `dangerouslySetInnerHTML` wrapped with `DOMPurify.sanitize()`
+- [ ] Passwords encrypted via `encryptPassword()` before API transmission
+- [ ] No `eval()`, `new Function()`, `innerHTML` assignment, or dynamic script injection
+- [ ] User-provided data escaped/sanitized before rendering
+- [ ] New protected routes added to middleware matcher pattern
+- [ ] No tokens stored in localStorage/sessionStorage — cookies only
+- [ ] No sensitive data in URL query parameters
+
+## 10. Routing & Navigation [P3]
+
+- [ ] Route paths from `@/routes` constants — no hardcoded strings
+- [ ] New pages placed in correct route group: `(wfm)`, `(hr)`, `(training)`
+- [ ] Page has `'use client'` if interactive
+- [ ] Layout created if page needs shared UI (sidebar tabs, subnav)
+- [ ] Navigation guard applied if page has forms with unsaved changes
+- [ ] `trailingSlash` convention respected in any programmatic navigation
+
+## 11. Performance [P2]
+
+- [ ] No unnecessary re-renders — memoization applied where parent re-renders cascade
+- [ ] Dynamic imports for heavy components not visible on initial render
+- [ ] Images use `next/image` with explicit `width`/`height` — no raw `<img>` tags
+- [ ] No synchronous blocking in render (no `JSON.parse` of large payloads, no heavy loops)
+- [ ] Named imports from libraries — no `import * as` or full-library imports
+- [ ] No new `moment` usage — use `dayjs` (moment is 300KB+ full-locale)
+
+## 12. Error Handling [P1]
+
+- [ ] API calls: RTK Query `isError` checked OR try/catch with `showToast`
+- [ ] No silent error swallowing — every catch block logs or notifies
+- [ ] `useEffect` async operations wrapped in try/catch
+- [ ] Optional chaining `?.` on API response data that may be null/undefined
+- [ ] No unhandled promise rejections — `.catch()` on promises or try/catch on await
+- [ ] Consider adding `error.tsx` for new page routes (currently zero exist)
+
+## 13. Code Cleanliness & Simplicity [P3]
+
+- [ ] No `console.log` — remove before commit (20+ already exist as tech debt, don't add more)
+- [ ] No commented-out code blocks — use git history
+- [ ] No TODO/FIXME without ticket reference or expiration
+- [ ] Functions under 50 lines — extract helpers for complex logic
+- [ ] Descriptive names: `isLoading` not `loading`, `hasError` not `error` for booleans
+- [ ] No dead code paths or unreachable branches
+- [ ] No nested ternary operators — use `if/else` or early returns for multiple conditions
+- [ ] Clarity over brevity — prefer explicit readable code over dense one-liners that require mental parsing
+- [ ] No unnecessary abstractions — don't wrap a function in another function if it adds no value
+
+## 14. Accessibility [P3]
+
+- [ ] Interactive elements have visible labels or `aria-label`
+- [ ] Custom clickable `<div>`/`<span>` have `role="button"` + `onKeyDown` handler
+- [ ] Form inputs have labels via Mantine's `label` prop or `aria-label`
+- [ ] Status indicators use icon + text, not color alone
+- [ ] Tab order makes sense — no `tabIndex` hacks
+
+## 15. Testing [P3] (If Applicable)
+
+- [ ] New shared component has a smoke test (renders without crash)
+- [ ] Tests use `getByRole` > `getByLabelText` > `getByText` — `getByTestId` is last resort
+- [ ] Mocks scoped to test — no global mock leakage
+- [ ] Test co-located: `Component.test.tsx` in same directory
+- [ ] No snapshot tests — they add noise, not confidence
+- [ ] Test clarity over DRY — scenario-specific props/state visible inside each test, not hidden in shared setup
+- [ ] Shared `beforeEach` only when 3+ tests genuinely share identical setup
+- [ ] Static "default render" assertions consolidated into one smoke test
+
+## 16. Dependency Management [P1]
+
+- [ ] No new `npm install` or `package.json` changes without explicit developer approval
+- [ ] Before suggesting a new package, verify no existing dependency already covers the need
+- [ ] No version bumps or lockfile changes unless specifically requested
+
+---
+
+## Review Output Format
+
+```
+### [Section Name] — PASS / FAIL / N/A
+
+**P0 FAIL** [src/services/newService.ts:45] Token logged to console
+→ Remove `console.log(token)` — sensitive data exposure
+
+**P2 FAIL** [src/app/mgt/(hr)/feature/page.tsx:120] Missing useMemo on filtered list
+→ Wrap `data.filter(...)` in `useMemo(() => ..., [data])`
+
+**P4 FAIL** [src/app/mgt/(hr)/feature/page.tsx:89] Hardcoded hex color
+→ Use `Colors.primaryColor` from `@/app/style/colors`
+```
+
+Report P0 and P1 issues first. These must be fixed before merge. P2-P4 can be addressed in follow-up if non-blocking.

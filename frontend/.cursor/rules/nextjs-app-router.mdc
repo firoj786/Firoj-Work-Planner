@@ -1,0 +1,88 @@
+---
+description: Next.js App Router conventions — routing, layouts, middleware, SSR safety, and error boundaries
+globs: src/app/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Next.js App Router Conventions
+
+## Route Structure
+
+```
+src/app/
+  auth/            → /auth/*         (login, MFA, forgot-password)
+  mgt/             → /mgt/*          (management portal)
+    (wfm)/         → route group     (rosters, studio-tracker, configuration)
+    (hr)/          → route group     (employees, leaves, swaps, attendance, organizations)
+    (training)/    → route group     (training)
+  gp/              → /gp/*           (GP employee portal)
+  offline/         → /offline        (PWA offline fallback)
+```
+
+- Parenthesized folders are route groups — do NOT create URL segments
+- Feature components live co-located in `components/` subdirectories next to their page
+- Do NOT create new top-level route directories — features go inside `(wfm)`, `(hr)`, etc.
+
+## Client vs Server Boundaries
+
+- This project is client-heavy: 100+ `'use client'` files, zero `'use server'` directives
+- Root `layout.tsx` is the only meaningful server component (fetches locale/messages)
+- Default to `'use client'` for new pages unless the page has zero interactivity
+
+**Critical SSR safety rule**: Any code accessing `window`, `document`, `navigator`, `localStorage`, or `sessionStorage` MUST guard with:
+
+```typescript
+if (typeof window !== 'undefined') {
+  // browser-only code
+}
+```
+
+Or use `storageManager` from `@/utils/storageManager` which handles this internally.
+
+## Error Handling Gap
+
+No `error.tsx` files exist in the codebase. When adding critical features, create `error.tsx` alongside the page:
+
+```typescript
+'use client';
+export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+  return <ErrorFallback error={error} onRetry={reset} />;
+}
+```
+
+No `loading.tsx` files exist either. Loading states are handled via RTK Query's `isLoading` flags and Mantine skeletons.
+
+## Middleware (`src/middleware.ts`)
+
+- Matcher: `['/', '/auth/:path*', '/gp/:path*', '/mgt/:path*']`
+- Decodes JWT from `ID_TOKEN` cookie, extracts `custom:role`
+- Enforces: GP users to `/gp/*`, MGT users to `/mgt/*`
+- Environment gates: studio-tracker and organizations are dev-only
+- Unauthenticated users redirect to `/auth/login`
+- **New protected routes MUST be added to the matcher pattern**
+
+## Layouts
+
+| Layout | Location | Provides |
+|---|---|---|
+| Root | `src/app/layout.tsx` | NextIntl, Redux, Mantine, Modals, Analytics, PWA |
+| MGT | `src/app/mgt/layout.tsx` | Sidebar navigation (`mgt-layout`) |
+| GP | `src/app/gp/layout.tsx` | Bottom navigation bar (`gp-layout`) |
+| Auth | `src/app/auth/login/layout.tsx` | Suspense wrapper |
+
+## Route Constants
+
+Import from `@/routes` — never hardcode paths:
+
+```typescript
+import { Routes } from '@/routes';
+// Routes.MGT.WFM.ROSTERS.ROSTER_CURRENT  — NOT '/mgt/roster-current'
+// Routes.GP.SCHEDULE                       — NOT '/gp/schedule'
+```
+
+## Config Gotchas
+
+- `trailingSlash: true` — all routes end with `/`, affects redirects and links
+- `output: 'standalone'` — Docker deployment, no `node_modules` in container
+- `reactStrictMode: false` — effects only fire once (no double-invoke in dev)
+- `compress: true` — gzip enabled at Next.js level

@@ -1,0 +1,138 @@
+---
+description: React component patterns — Mantine UI, hooks, performance, anti-patterns, and SSR safety
+globs: **/*.tsx
+alwaysApply: false
+---
+
+# React Component Patterns
+
+## Component Organization
+
+- **Shared**: `src/components/` — reusable across features (435+ files)
+- **Feature-scoped**: co-located in `src/app/.../components/` next to their page
+- Each component: own directory with `index.tsx` + optional `.module.scss`
+- Never put feature-specific components in `src/components/`
+
+## UI Library — Mantine v7
+
+- All UI primitives from `@mantine/core` — do NOT use raw HTML equivalents when Mantine has a component
+- Modals: `@mantine/modals` via `ModalsProvider` — use `modals.open()` or `modals.openConfirmModal()`
+- Notifications: custom wrapper only — always use `showToast()` from `@/components/toast`
+
+```typescript
+import { showToast } from '@/components/toast';
+showToast({ type: 'success', title: 'Saved', message: 'Changes applied' });
+showToast({ type: 'error', title: 'Failed', message: error.message });
+```
+
+## Forms — Mantine Form + Custom Validation
+
+```typescript
+import { useForm } from '@mantine/form';
+const form = useForm({
+  mode: 'uncontrolled',
+  initialValues: { email: '', password: '' },
+  validate: { email: (v) => (!v ? t('required') : null) },
+});
+```
+
+- Custom validation hook: `@/hooks/useFormValidation` — supports `required()`, `email()`, `minLength()`, `pattern()`, `custom()`
+- Validation messages MUST use `useTranslations()` — never hardcoded English
+
+## Custom Hooks (`src/hooks/`)
+
+| Hook | Purpose |
+|---|---|
+| `useFormValidation` | Declarative form validation rules |
+| `useEmployeeSearch` | RTK Query mutation + pagination |
+| `useAttendanceTabPersistence` | Tab state in localStorage |
+| `useFetchLatestSchedule` | Schedule polling |
+| `useFetchUnreadNotifications` | Notification count |
+| `usePhysicsDrag` | Physics-based drag with RAF cleanup |
+| `useLoginForm`, `useMFAForm`, etc. | Feature-specific form logic |
+
+## Performance Rules — Optimize Only When Needed
+
+**useMemo** — use when there is a **measurable reason**:
+- TanStack Table column definitions (complex object creation)
+- Filtered/transformed lists over large datasets from API
+- Expensive computations (sorting, grouping, heavy transformations)
+
+**useMemo — do NOT use when:**
+- The expression is trivial: `x ?? {}`, `Boolean(x)`, `String(x)`, simple casts
+- It's a simple string concatenation or boolean check
+- Memoization adds more complexity than the value it provides
+- There is no measurable render/performance benefit
+
+```typescript
+// BAD: useMemo on trivial expressions — adds noise, zero perf gain
+const label = useMemo(() => `${firstName} ${lastName}`, [firstName, lastName]);
+const isValid = useMemo(() => !!email, [email]);
+const fallback = useMemo(() => value ?? {}, [value]);
+
+// GOOD: just compute inline — these are O(1) operations
+const label = `${firstName} ${lastName}`;
+const isValid = !!email;
+const fallback = value ?? {};
+
+// GOOD: useMemo where it actually matters
+const sortedRows = useMemo(() => rows.sort((a, b) => a.date - b.date), [rows]);
+const columns = useMemo(() => buildColumnDefs(t, role, isEditable), [t, role, isEditable]);
+```
+
+**useCallback** — use when:
+- Passing handlers as props to `React.memo` children
+- Passing handlers to `useEffect` dependency arrays
+- WebSocket event handlers
+
+**React.memo** — required for:
+- Row components inside `.map()` for lists > 20 items
+- Table cell renderers in TanStack Table
+- Existing examples: `FilterItem`, `FilterOptions`, `EmployeeRow`, `NameCell`
+
+**next/dynamic** — required for:
+- Modals, drawers, and dialogs not visible on initial render
+- Chart components (Recharts)
+- Heavy form components loaded conditionally
+
+```typescript
+const DynamicModal = dynamic(() => import('./HeavyModal'));
+const DynamicChart = dynamic(() => import('./Chart'), { ssr: false });
+```
+
+## Anti-Patterns to Avoid
+
+```typescript
+// NEVER: empty useEffect
+useEffect(() => {}, [options]); // Found in FilterItem.tsx — this is a no-op
+
+// NEVER: missing cleanup for timers/subscriptions
+useEffect(() => {
+  const id = setInterval(fn, 1000);
+  // Missing: return () => clearInterval(id);
+}, []);
+
+// NEVER: inline objects in memoized child props
+<MemoizedChild style={{ color: 'red' }} /> // Creates new ref every render
+
+// NEVER: business logic in JSX return
+return <div>{data.filter(x => x.active).map(x => <Row key={x.id} {...transform(x)} />)}</div>;
+// Extract: const activeRows = useMemo(() => data.filter(...).map(...), [data]);
+```
+
+## SSR Safety
+
+Any component accessing browser APIs must guard:
+
+```typescript
+// Use storageManager — NOT direct localStorage/sessionStorage
+import { getLocalStorage, setLocalStorage } from '@/utils/storageManager';
+
+// For other browser APIs:
+if (typeof window !== 'undefined') { /* safe */ }
+```
+
+## Icons
+
+- Primary: `@tabler/icons-react`
+- Custom SVGs: `src/components/assets/icons/`

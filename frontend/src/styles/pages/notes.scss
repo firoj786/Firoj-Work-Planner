@@ -1,0 +1,67 @@
+@use '../base/variables' as *;
+@use '../base/mixins' as *;
+
+.notes-grid-scroll {
+  @include glass-card;
+  padding: 0.75rem;
+}
+
+.notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.note-card {
+  @include glass-card;
+  padding: 1rem;
+  cursor: pointer;
+  transition: transform $transition;
+
+  &:hover {
+    transform: translateY(-2px);
+  }
+
+  &__title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  &__pin {
+    color: $primary;
+    flex-shrink: 0;
+  }
+
+  &__preview {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  &__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.75rem;
+  }
+}
+
+.note-editor {
+  @include glass-card;
+  padding: 0;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-editor__content {
+  padding: 1.25rem;
+}
+
+.markdown-preview {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}

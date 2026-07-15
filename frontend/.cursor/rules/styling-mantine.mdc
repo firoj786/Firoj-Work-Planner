@@ -1,0 +1,86 @@
+---
+description: Styling conventions — Mantine theme system, SCSS Modules, color tokens, and anti-patterns
+globs: **/*.{scss,css,tsx}
+alwaysApply: false
+---
+
+# Styling — Mantine + SCSS Modules
+
+## No Tailwind. No CSS-in-JS.
+
+This project uses Mantine v7 + SCSS Modules. Do NOT introduce Tailwind, styled-components, Emotion, or CSS-in-JS.
+
+## Mantine Theme (`src/app/style/`)
+
+- `theme.ts` — `createTheme()` with custom font, colors, scale
+- `colors.ts` — `Colors` static class with 60+ named constants
+- Font: `Figtree, sans-serif`
+- Primary color: `primaryPurple` (#331062)
+- Scale: `1.6`
+- **Light mode only**: `forceColorScheme="light"` — no dark mode
+
+## Styling Priority (Use In This Order)
+
+1. **Mantine component props** — `p="md"`, `bg="gray.1"`, `c="dimmed"`, `fz="sm"` for simple spacing/colors
+2. **Mantine `classNames` prop** — override component internals with SCSS module classes
+3. **SCSS Modules** — `*.module.scss` co-located with component, for layout and custom styling
+4. **Inline `style={{}}`** — ONLY for truly dynamic values computed at runtime (transforms, positions from drag operations)
+
+## Color Tokens
+
+```typescript
+import { Colors } from '@/app/style/colors';
+// Colors.primaryColor    → #331062
+// Colors.lightGrey       → #F5F5F5
+// Colors.emeraldGreen    → #50C878
+```
+
+**Never hardcode hex values** — always reference `Colors.xxx` or Mantine theme tokens. If a new color is needed, add it to `Colors` class first.
+
+## SCSS Modules
+
+```typescript
+import styles from './Component.module.scss';
+<div className={styles.container}>
+```
+
+- One `.module.scss` per component directory
+- Use `camelCase` class names: `.headerContainer`, not `.header-container`
+- Nest selectors sparingly — max 3 levels deep
+
+## PostCSS Breakpoints
+
+Available via `postcss-simple-vars`:
+
+```scss
+@media (max-width: $mantine-breakpoint-sm) { /* 48em */ }
+@media (max-width: $mantine-breakpoint-md) { /* 62em */ }
+```
+
+Breakpoints: xs=36em, sm=48em, md=62em, lg=75em, xl=88em. **No hardcoded px media queries.**
+
+## Anti-Patterns
+
+```tsx
+// BAD: Inline style for static values (100+ instances exist — do not add more)
+<div style={{ display: 'flex', gap: '8px', padding: '16px' }}>
+
+// GOOD: SCSS Module
+<div className={styles.flexRow}>
+
+// BAD: Raw hex in component
+<Text c="#331062">Title</Text>
+
+// GOOD: Color token
+<Text c={Colors.primaryColor}>Title</Text>
+
+// BAD: Hardcoded breakpoint
+@media (max-width: 768px) { }
+
+// GOOD: Mantine variable
+@media (max-width: $mantine-breakpoint-sm) { }
+```
+
+## Shift Colors
+
+Roster shift color codes: `@/utils/rosterShiftColorCodes.ts` — do not duplicate or hardcode shift colors.

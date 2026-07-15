@@ -1,0 +1,108 @@
+---
+description: TypeScript conventions — strict mode, type patterns, import ordering, date library mandate, and dependency hygiene
+alwaysApply: true
+---
+
+# TypeScript Standards
+
+## Scope: New and Modified Code Only
+
+Apply these standards to code you are writing or editing. Do NOT refactor surrounding old code to match (e.g., do not migrate existing `moment` imports, do not type existing `any` usages, do not reorder imports in files you didn't change). Legacy patterns are tracked as technical debt and addressed separately.
+
+## Strict Mode (Build-Breaking)
+
+`tsconfig.json` enforces — violations fail the build:
+
+- `strict: true` — no implicit any, strict null checks, strict function types
+- `noUnusedLocals: true` — no unused variables
+- `noUnusedParameters: true` — prefix unused params with `_` if intentional
+- `noFallthroughCasesInSwitch: true` — every case needs `break` or `return`
+
+## Type Discipline
+
+- **Co-locate types**: each slice, service module, and feature has its own `types.ts`
+- **Shared types**: `@/utils/types.ts`, `@/components/types.ts`, `@/services/types.ts`
+- **Prefer `interface` for object shapes, `type` for unions/intersections**
+- **Explicit return types on exported functions** — helps catch accidental return type changes
+- **Avoid `any`**: ESLint allows it, but new code should use `unknown` + type guards or proper types. Reserve `any` for untyped third-party API responses with a `// TODO: type this` comment
+- **No type assertions without justification**: `as any` and `as unknown as X` require a comment
+- **No implicit `any` in callbacks (TS7006)**: Always type callback parameters when inference is unclear — `.map()`, `.filter()`, `.reduce()`, event handlers
+
+```typescript
+// BAD: implicit any in callback
+data.map((item) => item.name);        // TS7006 if data is untyped
+onChange={(e) => setVal(e.target.value)} // implicit any event
+
+// GOOD: explicit callback types
+data.map((item: Employee) => item.name);
+onChange={(e: ChangeEvent<HTMLInputElement>) => setVal(e.target.value)}
+```
+
+## Date Library — dayjs Only
+
+**Use `dayjs` for all new code. Do not import `moment`.**
+
+The codebase has a legacy `moment` dependency (40+ files). Migration is in progress. New code must use:
+
+```typescript
+import dayjs from 'dayjs';
+dayjs(date).format('YYYY-MM-DD');
+```
+
+Date utilities: `@/utils/datetime.ts` (dayjs-based). Legacy formatters in `@/utils/formatter.ts` use moment — do not extend them.
+
+## Import Ordering (ESLint Error)
+
+Alphabetical within groups, blank lines between groups, styles last:
+
+```typescript
+// 1. Built-in
+import { useCallback, useMemo } from 'react';
+
+// 2. External packages
+import { Button, Table } from '@mantine/core';
+import { useTranslations } from 'next-intl';
+
+// 3. Internal (@/ alias)
+import { Routes } from '@/routes';
+import { showToast } from '@/components/toast';
+
+// 4. Parent/sibling
+import { useCustomHook } from '../hooks';
+import { FeatureType } from './types';
+
+// 5. Styles (always last)
+import styles from './page.module.scss';
+```
+
+## Path Aliases
+
+Always `@/*` for anything in `src/`. Relative paths only for same-directory or one-level-up imports:
+
+```typescript
+// Correct
+import { api } from '@/services/api';
+import { FeatureType } from './types';
+
+// Wrong
+import { api } from '../../../services/api';
+```
+
+## Enums and Constants
+
+- `@/utils/enums` — `TokenTypes`, `HTTPMethods`, `ENV`, `UserRoles`
+- `@/utils/constants` — region URLs, physics presets, config values
+- `@/utils/statusCodes` — HTTP status codes
+- `@/services/constants` — API URL constants
+- `@/routes` — route path constants
+
+**Never hardcode strings that exist as enums or constants.**
+
+## Dead Dependencies (Do Not Import)
+
+These packages are in `package.json` but not used — do not start using them without team discussion:
+
+- `@tiptap/*` — rich text editor (not integrated)
+- `lottie-react` — animations (not integrated)
+- `embla-carousel-react` — carousel (not integrated)
+- `server-only` — not imported anywhere
